@@ -1,0 +1,5 @@
+PipoGame.xcodeproj/xcuserdata/
+*.xcuserstate
+DerivedData/
+.DS_Store
+build/

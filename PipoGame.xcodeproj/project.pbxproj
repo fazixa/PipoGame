@@ -1,0 +1,339 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4812E2D24072F30671570668 /* ScreenRecorder.swift */; };
+		13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = DB7D83D29C503B65E76F174D /* Pipo.usdz */; };
+		866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030D1E6608E3E43A464A3336 /* ARViewContainer.swift */; };
+		D554773950E13F128CB326FA /* PipoAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A380F57777D8DF30632D7FB1 /* PipoAsset.swift */; };
+		D6735C8120071C3614BEFC0D /* PipoGameApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3597C6801AA242234D6077A /* PipoGameApp.swift */; };
+		D6BC045CBDF1801AF8E903F7 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEA526BF4F634AF3D407FF0 /* ContentView.swift */; };
+		F80E568966B6636C933EC273 /* PipoEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */; };
+		F9E10DF5C3C2CD9371F1C1FE /* PipoController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137F4E6E2FB64259EFA56AA9 /* PipoController.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		030D1E6608E3E43A464A3336 /* ARViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARViewContainer.swift; sourceTree = "<group>"; };
+		137F4E6E2FB64259EFA56AA9 /* PipoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoController.swift; sourceTree = "<group>"; };
+		4812E2D24072F30671570668 /* ScreenRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecorder.swift; sourceTree = "<group>"; };
+		6259E7E2DDA6889E1029CA3E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		6EEA526BF4F634AF3D407FF0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		79929F788216D50FA536CFD4 /* PipoGame.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PipoGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A380F57777D8DF30632D7FB1 /* PipoAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoAsset.swift; sourceTree = "<group>"; };
+		DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoEntity.swift; sourceTree = "<group>"; };
+		DB7D83D29C503B65E76F174D /* Pipo.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = Pipo.usdz; sourceTree = "<group>"; };
+		E3597C6801AA242234D6077A /* PipoGameApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoGameApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		92564A216B59D6E58AE9CA5A /* Assets */ = {
+			isa = PBXGroup;
+			children = (
+				DB7D83D29C503B65E76F174D /* Pipo.usdz */,
+			);
+			path = Assets;
+			sourceTree = "<group>";
+		};
+		A09C33E397694E595F54526E = {
+			isa = PBXGroup;
+			children = (
+				E68B89EE363CA7F103A4D5CC /* PipoGame */,
+				F623279FB6233633ACAFCA28 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E68B89EE363CA7F103A4D5CC /* PipoGame */ = {
+			isa = PBXGroup;
+			children = (
+				030D1E6608E3E43A464A3336 /* ARViewContainer.swift */,
+				6EEA526BF4F634AF3D407FF0 /* ContentView.swift */,
+				6259E7E2DDA6889E1029CA3E /* Info.plist */,
+				A380F57777D8DF30632D7FB1 /* PipoAsset.swift */,
+				137F4E6E2FB64259EFA56AA9 /* PipoController.swift */,
+				DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */,
+				E3597C6801AA242234D6077A /* PipoGameApp.swift */,
+				4812E2D24072F30671570668 /* ScreenRecorder.swift */,
+				92564A216B59D6E58AE9CA5A /* Assets */,
+			);
+			path = PipoGame;
+			sourceTree = "<group>";
+		};
+		F623279FB6233633ACAFCA28 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				79929F788216D50FA536CFD4 /* PipoGame.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		90B13C7217697642A2903092 /* PipoGame */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB342B6E6D3204C6D7B61072 /* Build configuration list for PBXNativeTarget "PipoGame" */;
+			buildPhases = (
+				EBA04696B5264BB5BB345495 /* Sources */,
+				12EB4DF7C6CC6C023AF7EF31 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PipoGame;
+			packageProductDependencies = (
+			);
+			productName = PipoGame;
+			productReference = 79929F788216D50FA536CFD4 /* PipoGame.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		3A7135229A861F13CCB807F0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					90B13C7217697642A2903092 = {
+						DevelopmentTeam = ZQ3376B866;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 8F50F0A6C06A3E62185A3A94 /* Build configuration list for PBXProject "PipoGame" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = A09C33E397694E595F54526E;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = F623279FB6233633ACAFCA28 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				90B13C7217697642A2903092 /* PipoGame */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		12EB4DF7C6CC6C023AF7EF31 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		EBA04696B5264BB5BB345495 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */,
+				D6BC045CBDF1801AF8E903F7 /* ContentView.swift in Sources */,
+				D554773950E13F128CB326FA /* PipoAsset.swift in Sources */,
+				F9E10DF5C3C2CD9371F1C1FE /* PipoController.swift in Sources */,
+				F80E568966B6636C933EC273 /* PipoEntity.swift in Sources */,
+				D6735C8120071C3614BEFC0D /* PipoGameApp.swift in Sources */,
+				0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0B15E17A319421EE0C0067A0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = ZQ3376B866;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		4992EFF59A033F013C33BA10 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = PipoGame/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.faeshayesteh.PipoGame;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		64E841A59114CFE142256F33 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = PipoGame/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.faeshayesteh.PipoGame;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A0741BD224F8CCFE64B724EA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = ZQ3376B866;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8F50F0A6C06A3E62185A3A94 /* Build configuration list for PBXProject "PipoGame" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A0741BD224F8CCFE64B724EA /* Debug */,
+				0B15E17A319421EE0C0067A0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		AB342B6E6D3204C6D7B61072 /* Build configuration list for PBXNativeTarget "PipoGame" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4992EFF59A033F013C33BA10 /* Debug */,
+				64E841A59114CFE142256F33 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 3A7135229A861F13CCB807F0 /* Project object */;
+}
