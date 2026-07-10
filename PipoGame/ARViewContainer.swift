@@ -18,7 +18,12 @@ struct ARViewContainer: UIViewRepresentable {
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) {
             config.frameSemantics.insert(.personSegmentationWithDepth)
         }
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            config.frameSemantics.insert(.sceneDepth)
+        }
         arView.session.run(config)
+        arView.session.delegate = context.coordinator.handTracker
+        controller.handTracker = context.coordinator.handTracker
 
         arView.environment.sceneUnderstanding.options.insert(.occlusion)
         arView.environment.sceneUnderstanding.options.insert(.receivesLighting)
@@ -59,6 +64,7 @@ struct ARViewContainer: UIViewRepresentable {
 
     final class Coordinator {
         let controller: PipoController
+        let handTracker = HandTracker()
         var updateSubscription: Cancellable?
 
         init(controller: PipoController) {

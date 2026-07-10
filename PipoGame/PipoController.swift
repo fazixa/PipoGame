@@ -20,6 +20,8 @@ final class PipoController: ObservableObject {
         /// Rigged path only: finish the current step, then freeze the clip.
         case stoppingWalk
         case sitting
+        /// Hand mode: Pipo rides the tracked palm.
+        case handFollowing
     }
 
     @Published var isPlaced = false
@@ -29,6 +31,11 @@ final class PipoController: ObservableObject {
     @Published var isToon = false
     /// Toon mode needs the clip-driven Pipo (the outline shell syncs clips).
     @Published var supportsToon = false
+    @Published var isHandMode = false
+    /// True while hand mode is on but no palm is currently detected.
+    @Published var searchingForHand = false
+
+    weak var handTracker: HandTracker?
 
     /// Set by ContentView; used to stop recording without on-screen UI.
     var onLongPress: (() -> Void)?
@@ -75,8 +82,8 @@ final class PipoController: ObservableObject {
         switch state {
         case .unplaced:
             place(at: result.worldTransform)
-        case .sitting:
-            break // hint tells the user to stand first
+        case .sitting, .handFollowing:
+            break // sitting: stand first; hand mode: taps don't steer
         case .idle, .walking, .stoppingWalk:
             let t = result.worldTransform.columns.3
             state = .walking(target: [t.x, t.y, t.z])
@@ -93,9 +100,53 @@ final class PipoController: ObservableObject {
         case .idle, .walking, .stoppingWalk:
             state = .sitting
             isSitting = true
-        case .unplaced:
+        case .unplaced, .handFollowing:
             break
         }
+    }
+
+    // MARK: - Hand mode
+
+    func toggleHandMode() {
+        isHandMode ? exitHandMode() : enterHandMode()
+    }
+
+    private func enterHandMode() {
+        guard let arView else { return }
+        if pipo == nil {
+            // Entering hand mode before placement: spawn Pipo hidden; he
+            // appears on the palm at first detection.
+            place(at: matrix_identity_float4x4)
+            pipo?.isEnabled = false
+        }
+        walkPlayback?.speed = 0
+        outlinePlayback?.speed = 0
+        handTracker?.reset()
+        handTracker?.enabled = true
+        state = .handFollowing
+        isHandMode = true
+        searchingForHand = true
+        _ = arView // silence unused warning paths
+    }
+
+    private func exitHandMode() {
+        handTracker?.enabled = false
+        isHandMode = false
+        searchingForHand = false
+        guard let pipo else {
+            state = .unplaced
+            return
+        }
+        pipo.isEnabled = true
+        // Settle onto whatever surface is below (tabletop, floor)
+        var position = pipo.position(relativeTo: nil)
+        if let groundY = groundHeight(at: position), position.y - groundY < 2.5 {
+            position.y = groundY
+            var transform = Transform(matrix: pipo.transformMatrix(relativeTo: nil))
+            transform.translation = position
+            pipo.move(to: transform, relativeTo: nil, duration: 0.3, timingFunction: .easeIn)
+        }
+        state = .idle
     }
 
     func toggleToon() {
@@ -140,6 +191,9 @@ final class PipoController: ObservableObject {
     }
 
     func reset() {
+        handTracker?.enabled = false
+        isHandMode = false
+        searchingForHand = false
         toonStyle.remove()
         outlineAnimOwner = nil
         outlineClip = nil
@@ -225,6 +279,37 @@ final class PipoController: ObservableObject {
 
         case .sitting:
             if !usesClips { animateSit(pipo: pipo, dt: dt) }
+
+        case .handFollowing:
+            followHand(pipo: pipo, dt: dt)
+        }
+    }
+
+    private func followHand(pipo: Entity, dt: Float) {
+        guard let tracker = handTracker, tracker.isTracking,
+              let palm = tracker.palmWorldPosition else {
+            searchingForHand = true
+            return
+        }
+        if searchingForHand { searchingForHand = false }
+        if !pipo.isEnabled {
+            // First detection after spawning hidden: appear on the palm
+            pipo.setPosition(palm, relativeTo: nil)
+            pipo.isEnabled = true
+        }
+
+        let current = pipo.position(relativeTo: nil)
+        // Slight lift so his feet sit on the palm rather than inside it
+        let target = palm + SIMD3<Float>(0, 0.005, 0)
+        pipo.setPosition(current + (target - current) * smoothing(rate: 16, dt: dt),
+                         relativeTo: nil)
+
+        // Turn with the hand: Pipo faces the wrist (back toward the holder).
+        if let direction = tracker.palmDirection {
+            let desired = simd_quatf(angle: atan2(-direction.x, -direction.z), axis: [0, 1, 0])
+            pipo.setOrientation(simd_slerp(pipo.orientation(relativeTo: nil), desired,
+                                           smoothing(rate: 10, dt: dt)),
+                                relativeTo: nil)
         }
     }
 

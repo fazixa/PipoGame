@@ -49,6 +49,14 @@ struct ContentView: View {
                         }
                         .disabled(!controller.isPlaced || !controller.supportsToon)
 
+                        Button {
+                            controller.toggleHandMode()
+                        } label: {
+                            Image(systemName: controller.isHandMode
+                                  ? "hand.raised.fill" : "hand.raised")
+                                .frame(maxWidth: .infinity)
+                        }
+
                         Button(role: .destructive) {
                             controller.reset()
                         } label: {
@@ -106,6 +114,11 @@ struct ContentView: View {
     }
 
     private var hint: String {
+        if controller.isHandMode {
+            return controller.searchingForHand
+                ? "Show your open palm to the camera"
+                : "Pipo is riding your hand — tap ✋ to set him down"
+        }
         if !controller.isPlaced {
             return "Tap a surface to place Pipo"
         }
