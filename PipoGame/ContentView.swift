@@ -40,6 +40,15 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity)
                         }
 
+                        Button {
+                            controller.toggleToon()
+                        } label: {
+                            Image(systemName: controller.isToon
+                                  ? "paintbrush.fill" : "paintbrush")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(!controller.isPlaced || !controller.supportsToon)
+
                         Button(role: .destructive) {
                             controller.reset()
                         } label: {

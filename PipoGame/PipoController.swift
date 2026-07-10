@@ -26,6 +26,9 @@ final class PipoController: ObservableObject {
     @Published var isSitting = false
     /// Sit is procedural-only until a sit clip is authored for the rigged Pipo.
     @Published var supportsSit = true
+    @Published var isToon = false
+    /// Toon mode needs the clip-driven Pipo (the outline shell syncs clips).
+    @Published var supportsToon = false
 
     /// Set by ContentView; used to stop recording without on-screen UI.
     var onLongPress: (() -> Void)?
@@ -43,6 +46,12 @@ final class PipoController: ObservableObject {
     private var walkPlayback: AnimationPlaybackController?
     private var usesClips: Bool { walkClip != nil }
 
+    // Toon look
+    private let toonStyle = ToonStyle()
+    private var outlineAnimOwner: Entity?
+    private var outlineClip: AnimationResource?
+    private var outlinePlayback: AnimationPlaybackController?
+
     private var time: Float = 0
     private var walkPhase: Float = 0
     private var baseScale: Float = 1
@@ -53,7 +62,10 @@ final class PipoController: ObservableObject {
         guard let pipo, baseScale > 0 else { return 1 }
         return pipo.scale.x / baseScale
     }
-    private var walkSpeed: Float { (usesClips ? 0.16 : 0.22) * scaleFactor }  // m/s
+    /// Playback rate of the walk clip; ground speed scales with it so the
+    /// feet stay planted. Tune this to change how fast Pipo walks.
+    private let walkPace: Float = 1.5
+    private var walkSpeed: Float { (usesClips ? 0.16 : 0.22) * scaleFactor * walkPace }  // m/s
     private let stepRate: Float = 11                          // procedural gait, rad/s
     private var arrivalDistance: Float { 0.03 * scaleFactor }
 
@@ -86,6 +98,40 @@ final class PipoController: ObservableObject {
         }
     }
 
+    func toggleToon() {
+        guard let pipo, supportsToon else { return }
+        if isToon {
+            toonStyle.remove()
+            outlineAnimOwner = nil
+            outlineClip = nil
+            outlinePlayback = nil
+            isToon = false
+            return
+        }
+        guard let clone = toonStyle.apply(to: pipo) else { return }
+        outlineAnimOwner = firstEntityWithAnimations(in: clone)
+        outlineClip = outlineAnimOwner?.availableAnimations.first
+        // Match whatever the body is doing right now (walking or frozen pose)
+        if let bodyPlayback = walkPlayback, bodyPlayback.isValid,
+           let owner = outlineAnimOwner, let clip = outlineClip {
+            let playback = owner.playAnimation(clip.repeat(),
+                                               transitionDuration: 0,
+                                               startsPaused: false)
+            playback.time = bodyPlayback.time
+            playback.speed = bodyPlayback.speed
+            outlinePlayback = playback
+        }
+        isToon = true
+    }
+
+    private func firstEntityWithAnimations(in entity: Entity) -> Entity? {
+        if !entity.availableAnimations.isEmpty { return entity }
+        for child in entity.children {
+            if let found = firstEntityWithAnimations(in: child) { return found }
+        }
+        return nil
+    }
+
     /// Pinch-to-scale, clamped to 0.2x–10x of Pipo's natural size.
     func pinch(by factor: Float) {
         guard let pipo else { return }
@@ -94,6 +140,12 @@ final class PipoController: ObservableObject {
     }
 
     func reset() {
+        toonStyle.remove()
+        outlineAnimOwner = nil
+        outlineClip = nil
+        outlinePlayback = nil
+        isToon = false
+        supportsToon = false
         anchor?.removeFromParent()
         anchor = nil
         pipo = nil
@@ -116,6 +168,7 @@ final class PipoController: ObservableObject {
             walkClip = loaded.walkClip
             walkClipDuration = loaded.walkClip.definition.duration
             supportsSit = false
+            supportsToon = true
         } else {
             pipo = PipoBuilder.build()
             supportsSit = true
@@ -151,6 +204,11 @@ final class PipoController: ObservableObject {
     func update(deltaTime dt: Float) {
         guard let pipo else { return }
         time += dt
+
+        if isToon, let arView {
+            toonStyle.updateThickness(cameraWorldPosition: arView.cameraTransform.translation,
+                                      worldScale: pipo.scale.x)
+        }
 
         switch state {
         case .unplaced:
@@ -218,11 +276,27 @@ final class PipoController: ObservableObject {
     private func startWalkClipIfNeeded() {
         guard let clip = walkClip, let owner = animationOwner else { return }
         if let playback = walkPlayback, playback.isValid {
-            playback.speed = 1
+            playback.speed = walkPace
         } else {
             walkPlayback = owner.playAnimation(clip.repeat(),
                                                transitionDuration: 0.25,
                                                startsPaused: false)
+            walkPlayback?.speed = walkPace
+        }
+
+        // Keep the outline shell walking in lockstep with the body
+        if let oOwner = outlineAnimOwner, let oClip = outlineClip {
+            if let playback = outlinePlayback, playback.isValid {
+                playback.speed = walkPace
+            } else {
+                outlinePlayback = oOwner.playAnimation(oClip.repeat(),
+                                                       transitionDuration: 0.25,
+                                                       startsPaused: false)
+                outlinePlayback?.speed = walkPace
+            }
+            if let body = walkPlayback, let outline = outlinePlayback {
+                outline.time = body.time
+            }
         }
     }
 
@@ -239,6 +313,8 @@ final class PipoController: ObservableObject {
         let distanceToContact = min(abs(t), abs(t - half), abs(t - walkClipDuration))
         if distanceToContact < 0.06 {
             playback.speed = 0
+            outlinePlayback?.speed = 0
+            if let outline = outlinePlayback { outline.time = playback.time }
             state = .idle
         }
     }

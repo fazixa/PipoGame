@@ -9,7 +9,9 @@
 /* Begin PBXBuildFile section */
 		0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4812E2D24072F30671570668 /* ScreenRecorder.swift */; };
 		13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = DB7D83D29C503B65E76F174D /* Pipo.usdz */; };
+		32989C1684D53131F4FF8280 /* ToonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */; };
 		866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030D1E6608E3E43A464A3336 /* ARViewContainer.swift */; };
+		991C06BF13433666BC5AC29C /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5B9A036E4DACE0CE732B0DBF /* Shaders.metal */; };
 		D554773950E13F128CB326FA /* PipoAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A380F57777D8DF30632D7FB1 /* PipoAsset.swift */; };
 		D6735C8120071C3614BEFC0D /* PipoGameApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3597C6801AA242234D6077A /* PipoGameApp.swift */; };
 		D6BC045CBDF1801AF8E903F7 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEA526BF4F634AF3D407FF0 /* ContentView.swift */; };
@@ -21,10 +23,12 @@
 		030D1E6608E3E43A464A3336 /* ARViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARViewContainer.swift; sourceTree = "<group>"; };
 		137F4E6E2FB64259EFA56AA9 /* PipoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoController.swift; sourceTree = "<group>"; };
 		4812E2D24072F30671570668 /* ScreenRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecorder.swift; sourceTree = "<group>"; };
+		5B9A036E4DACE0CE732B0DBF /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
 		6259E7E2DDA6889E1029CA3E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6EEA526BF4F634AF3D407FF0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		79929F788216D50FA536CFD4 /* PipoGame.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PipoGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A380F57777D8DF30632D7FB1 /* PipoAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoAsset.swift; sourceTree = "<group>"; };
+		C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToonStyle.swift; sourceTree = "<group>"; };
 		DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoEntity.swift; sourceTree = "<group>"; };
 		DB7D83D29C503B65E76F174D /* Pipo.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = Pipo.usdz; sourceTree = "<group>"; };
 		E3597C6801AA242234D6077A /* PipoGameApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoGameApp.swift; sourceTree = "<group>"; };
@@ -58,6 +62,8 @@
 				DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */,
 				E3597C6801AA242234D6077A /* PipoGameApp.swift */,
 				4812E2D24072F30671570668 /* ScreenRecorder.swift */,
+				5B9A036E4DACE0CE732B0DBF /* Shaders.metal */,
+				C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */,
 				92564A216B59D6E58AE9CA5A /* Assets */,
 			);
 			path = PipoGame;
@@ -149,6 +155,8 @@
 				F80E568966B6636C933EC273 /* PipoEntity.swift in Sources */,
 				D6735C8120071C3614BEFC0D /* PipoGameApp.swift in Sources */,
 				0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */,
+				991C06BF13433666BC5AC29C /* Shaders.metal in Sources */,
+				32989C1684D53131F4FF8280 /* ToonStyle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
