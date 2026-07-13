@@ -64,16 +64,23 @@ for name in KEEP_MESHES:
             mod.render_levels = mod.levels
 
 
-def principled_color(ob):
-    for slot in ob.material_slots:
-        m = slot.material
-        if m and m.use_nodes:
-            for n in m.node_tree.nodes:
-                if n.type == "BSDF_PRINCIPLED":
-                    c = n.inputs["Base Color"].default_value
-                    r = n.inputs["Roughness"].default_value
-                    return [c[0], c[1], c[2]], r
+def slot_color(material):
+    if material and material.use_nodes:
+        for n in material.node_tree.nodes:
+            if n.type == "BSDF_PRINCIPLED":
+                c = n.inputs["Base Color"].default_value
+                r = n.inputs["Roughness"].default_value
+                return [c[0], c[1], c[2]], r
     return [0.8, 0.8, 0.8], 0.5
+
+
+def slot_colors(ob):
+    """One (color, roughness) per material slot — meshes like the body
+    carry more than one (e.g. skin + mouth interior), and collapsing them
+    to a single color makes the second material invisible."""
+    if not ob.material_slots:
+        return [([0.8, 0.8, 0.8], 0.5)]
+    return [slot_color(slot.material) for slot in ob.material_slots]
 
 
 def evaluated_mesh(ob):
@@ -99,22 +106,25 @@ bpy.context.view_layer.update()
 for name in KEEP_MESHES:
     ob_eval, depsgraph = evaluated_mesh(bpy.data.objects[name])
     me = ob_eval.to_mesh(preserve_all_data_layers=False, depsgraph=depsgraph)
-    color, roughness = principled_color(bpy.data.objects[name])
-    counts, indices = [], []
+    materials = slot_colors(bpy.data.objects[name])
+    counts, indices, face_materials = [], [], []
     for p in me.polygons:
         counts.append(len(p.vertices))
         indices.extend(p.vertices)
+        face_materials.append(p.material_index)
     positions, normals = [], []
     for v in me.vertices:
         positions.extend(rounded(v.co))
         normals.extend(rounded(v.normal))
     meshes[name] = {
-        "color": color, "roughness": roughness,
+        "materials": materials, "face_materials": face_materials,
         "counts": counts, "indices": indices,
         "rest": positions, "normals": normals, "frames": [],
     }
     ob_eval.to_mesh_clear()
-    print(f"{name}: {len(positions)//3} verts, {len(counts)} faces")
+    material_count = len(set(face_materials))
+    print(f"{name}: {len(positions)//3} verts, {len(counts)} faces, "
+          f"{material_count} material(s) in use")
 
 for name in KEEP_MESHES:
     for mod in bpy.data.objects[name].modifiers:
