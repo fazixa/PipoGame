@@ -166,6 +166,11 @@ final class ToonStyle {
                                               lightingModel: .unlit)
             material.faceCulling = .front
             material.custom.value = SIMD4<Float>(0.02, 0, 0, 0)
+            // Baseline multiplier of 1; the shader's set_opacity() (taper
+            // weight) supplies the actual per-fragment value, fading the ink
+            // to fully transparent in step with the geometry push near a
+            // hull-taper seam (see pipoOutlineSurface).
+            material.blending = .transparent(opacity: .init(scale: 1))
             outlineMaterial = material
             return material
         } catch {

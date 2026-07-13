@@ -66,11 +66,17 @@ void pipoFaceSurface(realitykit::surface_parameters params)
     params.surface().set_emissive_color(c);
 }
 
-// Flat ink color — darker wine-pink derived from Pipo's body color.
+// Flat ink color — darker wine-pink derived from Pipo's body color. Faded
+// out by the same taper weight the geometry modifier uses (see
+// pipoOutlineGeometry): scaling the push alone still leaves these faces at
+// full opaque ink, just barely puffed out, which reads as a thin fully-
+// colored ring tracing the taper boundary instead of fading away with it.
 [[visible]]
 void pipoOutlineSurface(realitykit::surface_parameters params)
 {
     half3 ink = half3(0.36h, 0.015h, 0.12h);
     params.surface().set_base_color(ink);
     params.surface().set_emissive_color(ink);
+    half taper = half(params.geometry().color().r);
+    params.surface().set_opacity(taper);
 }
