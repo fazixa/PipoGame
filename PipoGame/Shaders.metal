@@ -30,17 +30,18 @@ void pipoOutlineGeometry(realitykit::geometry_parameters params)
     params.geometry().set_model_position_offset(n * offset + toward * pipoHullPull(offset));
 }
 
-// Eyes/mouth in toon mode: pulled toward the camera strictly more than the
-// hull so the body's inflated shell can never surface around them (halo).
-// A pull along the view ray does not move them on screen.
+// Eyes/mouth in toon mode: no geometry offset. Eyes/mouth were originally
+// pulled toward the camera to stop the outline hull's inflated shell from
+// surfacing as a halo ring around them — but the outline clone already
+// assigns face slots a fully transparent material (see ToonStyle.apply),
+// which solves that robustly on its own. The pull became actively harmful
+// once eyes/mouth stopped being separate mesh entities and became material
+// slots on the SAME continuous mesh as the skin (GeomSubsets): pulling those
+// vertices forward tears them away from their connected neighbors, pushing
+// e.g. the mouth cavity out past the surrounding face surface.
 [[visible]]
 void pipoFacePullGeometry(realitykit::geometry_parameters params)
 {
-    float4 cp = params.uniforms().custom_parameter();
-    float pull = pipoHullPull(cp.x) + 0.12;
-    float3 cameraModel = cp.yzw;
-    float3 toward = normalize(cameraModel - params.geometry().model_position());
-    params.geometry().set_model_position_offset(toward * pull);
 }
 
 // Flat unlit face features — Material.002's dark plum.
