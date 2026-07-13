@@ -1,88 +1,170 @@
-import ReplayKit
+import RealityKit
 import AVFoundation
+import CoreImage
+import Metal
 import Photos
 import UIKit
 
-/// Records the app's screen with ReplayKit and saves the result to the
-/// Photos library. UI is hidden by ContentView before capture starts, so
-/// the footage contains only the AR view.
+/// High-resolution AR recorder. While recording, the ARView's render scale
+/// is raised so the whole AR pipeline (camera feed, occlusion, Pipo, toon
+/// outline) is rendered at ~4K, and every frame's framebuffer texture is
+/// tapped via renderCallbacks.postProcess into an HEVC writer. The on-screen
+/// image is unchanged (downscaled by the display); UI is hidden by
+/// ContentView so footage contains only the AR view.
 final class ScreenRecorder: NSObject, ObservableObject {
 
     @Published var isRecording = false
     @Published var toast: String?
 
+    /// Recording height in pixels; width follows the screen aspect.
+    private let targetHeight: CGFloat = 3840
+
+    private weak var arView: ARView?
+    private var originalScaleFactor: CGFloat = 0
+
+    private let device = MTLCreateSystemDefaultDevice()!
+    private lazy var ciContext = CIContext(mtlDevice: device,
+                                           options: [.cacheIntermediates: false])
+    private var ringTextures: [MTLTexture] = []
+    private var ringIndex = 0
+
     private var writer: AVAssetWriter?
-    private var videoInput: AVAssetWriterInput?
+    private var input: AVAssetWriterInput?
+    private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var outputURL: URL?
+    private var recordingStart: CFTimeInterval?
     private let queue = DispatchQueue(label: "pipo.recorder")
 
-    func start() {
-        guard !isRecording else { return }
-        let recorder = RPScreenRecorder.shared()
-        guard recorder.isAvailable else {
-            showToast("Screen recording unavailable")
-            return
-        }
+    // MARK: - Control
 
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pipo-\(Int(Date().timeIntervalSince1970)).mov")
-        do {
-            let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-            let scale = UIScreen.main.scale
-            let size = UIScreen.main.bounds.size
-            let settings: [String: Any] = [
-                AVVideoCodecKey: AVVideoCodecType.hevc,
-                AVVideoWidthKey: Int(size.width * scale),
-                AVVideoHeightKey: Int(size.height * scale),
-            ]
-            let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
-            input.expectsMediaDataInRealTime = true
-            writer.add(input)
-            self.writer = writer
-            self.videoInput = input
-            self.outputURL = url
-        } catch {
-            showToast("Could not start recording")
-            return
-        }
+    func start(arView: ARView) {
+        guard !isRecording, writer == nil else { return }
+        self.arView = arView
 
-        recorder.isMicrophoneEnabled = false
-        recorder.startCapture(handler: { [weak self] buffer, type, error in
-            guard error == nil, type == .video else { return }
-            self?.queue.async { self?.append(buffer) }
-        }, completionHandler: { [weak self] error in
-            DispatchQueue.main.async {
-                if let error {
-                    self?.showToast(error.localizedDescription)
-                } else {
-                    self?.isRecording = true
-                }
-            }
-        })
+        originalScaleFactor = arView.contentScaleFactor
+        let pointHeight = max(arView.bounds.height, 1)
+        arView.contentScaleFactor = targetHeight / pointHeight
+
+        recordingStart = nil
+        isRecording = true
+        arView.renderCallbacks.postProcess = { [weak self] context in
+            self?.captureFrame(context)
+        }
     }
 
     func stop() {
         guard isRecording else { return }
         isRecording = false
-        RPScreenRecorder.shared().stopCapture { [weak self] _ in
-            self?.queue.async { self?.finish() }
+        arView?.renderCallbacks.postProcess = nil
+        arView?.contentScaleFactor = originalScaleFactor
+        queue.async { [weak self] in self?.finish() }
+    }
+
+    // MARK: - Per-frame capture (render thread)
+
+    private func captureFrame(_ context: ARView.PostProcessContext) {
+        let source = context.sourceColorTexture
+
+        // Mandatory passthrough: with a postProcess callback installed we
+        // are responsible for filling the output texture.
+        if let blit = context.commandBuffer.makeBlitCommandEncoder() {
+            blit.copy(from: source, to: context.targetColorTexture)
+            blit.endEncoding()
+        }
+        guard isRecording else { return }
+
+        if writer == nil {
+            setUpWriter(width: source.width, height: source.height,
+                        format: source.pixelFormat)
+        }
+        guard !ringTextures.isEmpty else { return }
+
+        // Copy into our own ring texture so the renderer can recycle its
+        // drawable; encode to video once the GPU finishes this frame.
+        let capture = ringTextures[ringIndex]
+        ringIndex = (ringIndex + 1) % ringTextures.count
+        if let blit = context.commandBuffer.makeBlitCommandEncoder() {
+            blit.copy(from: source, to: capture)
+            blit.endEncoding()
+        }
+        let timestamp = CACurrentMediaTime()
+        context.commandBuffer.addCompletedHandler { [weak self] _ in
+            self?.queue.async { self?.append(texture: capture, at: timestamp) }
         }
     }
 
-    private func append(_ buffer: CMSampleBuffer) {
-        guard let writer, let input = videoInput,
-              CMSampleBufferDataIsReady(buffer) else { return }
-        if writer.status == .unknown {
-            writer.startWriting()
-            writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(buffer))
+    private func setUpWriter(width: Int, height: Int, format: MTLPixelFormat) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pipo-\(Int(Date().timeIntervalSince1970)).mov")
+        do {
+            let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+            let settings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.hevc,
+                AVVideoWidthKey: width,
+                AVVideoHeightKey: height,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 55_000_000,
+                    AVVideoExpectedSourceFrameRateKey: 60,
+                ],
+            ]
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+            input.expectsMediaDataInRealTime = true
+            let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+                assetWriterInput: input,
+                sourcePixelBufferAttributes: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                    kCVPixelBufferWidthKey as String: width,
+                    kCVPixelBufferHeightKey as String: height,
+                ])
+            writer.add(input)
+            self.writer = writer
+            self.input = input
+            self.adaptor = adaptor
+            self.outputURL = url
+
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: format, width: width, height: height, mipmapped: false)
+            descriptor.usage = [.shaderRead]
+            descriptor.storageMode = .private
+            ringTextures = (0..<3).compactMap { _ in device.makeTexture(descriptor: descriptor) }
+        } catch {
+            showToast("Could not start recording")
         }
-        guard writer.status == .writing, input.isReadyForMoreMediaData else { return }
-        input.append(buffer)
+    }
+
+    // MARK: - Encoding (serial queue)
+
+    private func append(texture: MTLTexture, at timestamp: CFTimeInterval) {
+        guard isRecording || recordingStart != nil,
+              let writer, let input, let adaptor else { return }
+
+        if recordingStart == nil {
+            recordingStart = timestamp
+            writer.startWriting()
+            writer.startSession(atSourceTime: .zero)
+        }
+        guard writer.status == .writing, input.isReadyForMoreMediaData,
+              let pool = adaptor.pixelBufferPool else { return }
+
+        var maybeBuffer: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &maybeBuffer)
+        guard let buffer = maybeBuffer else { return }
+
+        // Metal textures are top-left origin; Core Image is bottom-left.
+        var image = CIImage(mtlTexture: texture, options: [:])!
+        image = image.transformed(by: CGAffineTransform(scaleX: 1, y: -1)
+            .translatedBy(x: 0, y: -image.extent.height))
+        ciContext.render(image, to: buffer, bounds: image.extent,
+                         colorSpace: CGColorSpaceCreateDeviceRGB())
+
+        let seconds = timestamp - (recordingStart ?? timestamp)
+        adaptor.append(buffer, withPresentationTime:
+                        CMTime(seconds: seconds, preferredTimescale: 600))
     }
 
     private func finish() {
         guard let writer, let url = outputURL else { return }
-        videoInput?.markAsFinished()
+        input?.markAsFinished()
         if writer.status == .writing {
             writer.finishWriting { [weak self] in
                 self?.saveToPhotos(url)
@@ -91,8 +173,12 @@ final class ScreenRecorder: NSObject, ObservableObject {
             showToast("Recording failed")
         }
         self.writer = nil
-        self.videoInput = nil
+        self.input = nil
+        self.adaptor = nil
         self.outputURL = nil
+        self.recordingStart = nil
+        self.ringTextures = []
+        self.ringIndex = 0
     }
 
     private func saveToPhotos(_ url: URL) {

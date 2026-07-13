@@ -109,7 +109,11 @@ struct ContentView: View {
         // Let the UI fade out fully before capture begins so it never
         // appears in the footage.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            recorder.start()
+            guard let arView = controller.arView else {
+                uiVisible = true
+                return
+            }
+            recorder.start(arView: arView)
         }
     }
 
