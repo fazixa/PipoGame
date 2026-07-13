@@ -27,6 +27,10 @@ struct ARViewContainer: UIViewRepresentable {
 
         arView.environment.sceneUnderstanding.options.insert(.occlusion)
         arView.environment.sceneUnderstanding.options.insert(.receivesLighting)
+        // ARKit's estimated room lighting is often conservative, so
+        // PhysicallyBasedMaterial-lit virtual objects (Pipo's skin) can
+        // read darker than intended. Boost how strongly they respond to it.
+        arView.environment.lighting.intensityExponent = 1.8
 
         let coaching = ARCoachingOverlayView()
         coaching.session = arView.session

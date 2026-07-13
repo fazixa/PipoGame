@@ -28,15 +28,29 @@ def safe_name(name):
     return safe
 
 
-def define_material(stage, path, color, roughness):
+def define_material(stage, path, color, roughness, metallic=0.0):
     mat = UsdShade.Material.Define(stage, path)
     shader = UsdShade.Shader.Define(stage, f"{path}/pbr")
     shader.CreateIdAttr("UsdPreviewSurface")
     shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
     shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(roughness))
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(metallic))
     mat.CreateSurfaceOutput().ConnectToSource(
         shader.CreateOutput("surface", Sdf.ValueTypeNames.Token))
     return mat
+
+
+# Skin-specific PBR look. Only applied to bright (non-face) material slots —
+# eyes/mouth render fully unlit in the app (PipoAsset.flattenFaceSlots), so
+# their metallic/roughness values are never actually visible; leaving them
+# at whatever Blender's Principled BSDF exported keeps the data honest.
+SKIN_METALLIC = 0.54
+SKIN_ROUGHNESS = 0.85
+
+
+def is_skin_color(color):
+    r, g, b = color[:3]
+    return (0.299 * r + 0.587 * g + 0.114 * b) >= 0.25
 
 
 def main(src, dst):
@@ -122,7 +136,12 @@ def main(src, dst):
                 groups.setdefault(mat_index, []).append(face_index)
             for mat_index, face_indices in groups.items():
                 color, roughness = materials[mat_index]
-                mat = define_material(stage, f"/Materials/{safe}_{mat_index}", color, roughness)
+                if is_skin_color(color):
+                    roughness, metallic = SKIN_ROUGHNESS, SKIN_METALLIC
+                else:
+                    metallic = 0.0
+                mat = define_material(stage, f"/Materials/{safe}_{mat_index}", color,
+                                      roughness, metallic)
                 subset = UsdGeom.Subset.Define(stage, f"{mesh_path}/mat_{mat_index}")
                 subset.CreateElementTypeAttr().Set(UsdGeom.Tokens.face)
                 subset.CreateIndicesAttr().Set(Vt.IntArray(face_indices))
@@ -131,7 +150,11 @@ def main(src, dst):
             UsdGeom.Subset.SetFamilyType(mesh, "materialBind", UsdGeom.Tokens.partition)
         else:
             color, roughness = materials[0] if materials else ([0.8, 0.8, 0.8], 0.5)
-            mat = define_material(stage, f"/Materials/{safe}", color, roughness)
+            if is_skin_color(color):
+                roughness, metallic = SKIN_ROUGHNESS, SKIN_METALLIC
+            else:
+                metallic = 0.0
+            mat = define_material(stage, f"/Materials/{safe}", color, roughness, metallic)
             UsdShade.MaterialBindingAPI(mesh.GetPrim()).Bind(mat)
 
         # skeleton + blend shape binding

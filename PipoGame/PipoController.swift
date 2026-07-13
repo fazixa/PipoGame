@@ -333,8 +333,12 @@ final class PipoController: ObservableObject {
         }
 
         let current = pipo.position(relativeTo: nil)
-        // Slight lift so his feet sit on the palm rather than inside it
-        let target = palm + SIMD3<Float>(0, 0.005, 0)
+        // Lift so his feet clear the palm rather than clipping into it —
+        // ARKit's hand depth estimate is noisy enough at this close range
+        // that a small offset isn't reliable margin against person-
+        // occlusion misreading his feet as behind the hand. Scales with
+        // pinch so a giant/tiny Pipo still clears proportionally.
+        let target = palm + SIMD3<Float>(0, 0.02 * scaleFactor, 0)
         pipo.setPosition(current + (target - current) * smoothing(rate: 16, dt: dt),
                          relativeTo: nil)
 
