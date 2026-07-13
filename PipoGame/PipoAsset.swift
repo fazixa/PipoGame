@@ -28,6 +28,7 @@ enum PipoAsset {
         root.scale = SIMD3<Float>(repeating: worldScale)
 
         applyGroundingShadow(root)
+        flattenFaceSlots(root)
 
         guard let owner = firstEntityWithAnimations(in: root),
               let clip = owner.availableAnimations.first else {
@@ -45,6 +46,26 @@ enum PipoAsset {
             if let found = firstEntityWithAnimations(in: child) { return found }
         }
         return nil
+    }
+
+    /// Eyes/mouth (identified by their dark near-black tint, same check
+    /// ToonStyle uses) read as flat unlit color rather than catching PBR
+    /// specular/shadowing — small, near-black features where PBR shading
+    /// mostly just adds noise instead of readable shape.
+    private static func flattenFaceSlots(_ entity: Entity) {
+        if var model = entity.components[ModelComponent.self] {
+            model.materials = model.materials.map { material in
+                guard let pbr = material as? PhysicallyBasedMaterial else { return material }
+                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+                pbr.baseColor.tint.getRed(&r, green: &g, blue: &b, alpha: &a)
+                guard (0.299 * r + 0.587 * g + 0.114 * b) < 0.25 else { return material }
+                return UnlitMaterial(color: pbr.baseColor.tint)
+            }
+            entity.components.set(model)
+        }
+        for child in entity.children {
+            flattenFaceSlots(child)
+        }
     }
 
     private static func applyGroundingShadow(_ entity: Entity) {

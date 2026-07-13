@@ -18,9 +18,21 @@ final class ToonStyle {
     // entities — they are identified per SLOT by their dark tint (body is
     // pink, face features are near-black plum).
     private func isFaceSlot(_ material: any RealityKit.Material) -> Bool {
-        guard let pbr = material as? PhysicallyBasedMaterial else { return false }
+        let tint: UIColor
+        if let pbr = material as? PhysicallyBasedMaterial {
+            tint = pbr.baseColor.tint
+        } else if let unlit = material as? UnlitMaterial {
+            // PipoAsset.flattenFaceSlots already converts eyes/mouth to
+            // Unlit at load time (outside toon mode too) — still need to
+            // recognize them here by tint so they get the face-pull
+            // treatment instead of being swept into the outline hull as a
+            // body slot (which would wrap an ink ring around them).
+            tint = unlit.color.tint
+        } else {
+            return false
+        }
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        pbr.baseColor.tint.getRed(&r, green: &g, blue: &b, alpha: &a)
+        tint.getRed(&r, green: &g, blue: &b, alpha: &a)
         return (0.299 * r + 0.587 * g + 0.114 * b) < 0.25
     }
 

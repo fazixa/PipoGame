@@ -218,6 +218,14 @@ final class PipoController: ObservableObject {
         pipo.scale = SIMD3<Float>(repeating: scaled)
     }
 
+    /// Two-finger rotate gesture, turning Pipo in place around the vertical
+    /// (world up) axis.
+    func rotate(by radians: Float) {
+        guard let pipo else { return }
+        let spin = simd_quatf(angle: -radians, axis: [0, 1, 0])
+        pipo.setOrientation(spin * pipo.orientation(relativeTo: nil), relativeTo: nil)
+    }
+
     func reset() {
         handTracker?.enabled = false
         isHandMode = false

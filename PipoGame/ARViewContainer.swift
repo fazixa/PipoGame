@@ -50,7 +50,13 @@ struct ARViewContainer: UIViewRepresentable {
 
         let pinch = UIPinchGestureRecognizer(target: context.coordinator,
                                              action: #selector(Coordinator.handlePinch(_:)))
+        pinch.delegate = context.coordinator
         arView.addGestureRecognizer(pinch)
+
+        let rotation = UIRotationGestureRecognizer(target: context.coordinator,
+                                                    action: #selector(Coordinator.handleRotation(_:)))
+        rotation.delegate = context.coordinator
+        arView.addGestureRecognizer(rotation)
 
         controller.arView = arView
         context.coordinator.updateSubscription = arView.scene.subscribe(to: SceneEvents.Update.self) { [weak controller] event in
@@ -66,13 +72,14 @@ struct ARViewContainer: UIViewRepresentable {
         Coordinator(controller: controller)
     }
 
-    final class Coordinator {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let controller: PipoController
         let handTracker = HandTracker()
         var updateSubscription: Cancellable?
 
         init(controller: PipoController) {
             self.controller = controller
+            super.init()
         }
 
         @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
@@ -93,6 +100,19 @@ struct ARViewContainer: UIViewRepresentable {
             guard recognizer.state == .changed else { return }
             controller.pinch(by: Float(recognizer.scale))
             recognizer.scale = 1
+        }
+
+        @objc func handleRotation(_ recognizer: UIRotationGestureRecognizer) {
+            guard recognizer.state == .changed else { return }
+            controller.rotate(by: Float(recognizer.rotation))
+            recognizer.rotation = 0
+        }
+
+        // Let two-finger pinch and rotate run together instead of one
+        // gesture stealing the touches from the other.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
         }
     }
 }
