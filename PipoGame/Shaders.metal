@@ -17,6 +17,17 @@ inline float pipoHullPull(float offset)
 // between the two surfaces approaches zero and the hull rim would lose the
 // depth test (interior lines fade at soft angles); the toward-camera bias
 // keeps a band of ink alive along those junctions.
+//
+// The push is additionally scaled by the mesh's baked vertex color (see
+// build_baked_usdz.py's "hullWeight" -> displayColor, sourced from Blender
+// vertex groups named in HULL_TAPER_GROUPS, e.g. "mouth_interior"). Concave
+// regions like the mouth interior now share vertices directly with the
+// surrounding skin (no longer separate mesh entities) — full inflation
+// there tears the hull away from its connected neighbors and pokes it
+// through the skin at their shared boundary. Weight 0 at the seam ramps
+// smoothly to 1 a few rings out, so the hull settles to nothing exactly at
+// the seam instead of cracking.
+//
 // custom_parameter() = (offset in model units, camera position in model space),
 // updated per frame by ToonStyle for constant on-screen thickness.
 [[visible]]
@@ -27,7 +38,9 @@ void pipoOutlineGeometry(realitykit::geometry_parameters params)
     float3 cameraModel = cp.yzw;
     float3 n = normalize(params.geometry().normal());
     float3 toward = normalize(cameraModel - params.geometry().model_position());
-    params.geometry().set_model_position_offset(n * offset + toward * pipoHullPull(offset));
+    float taper = params.geometry().color().r;
+    params.geometry().set_model_position_offset(
+        (n * offset + toward * pipoHullPull(offset)) * taper);
 }
 
 // Eyes/mouth in toon mode: no geometry offset. Eyes/mouth were originally

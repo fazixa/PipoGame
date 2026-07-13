@@ -12,6 +12,7 @@
 # exact deformation; the USDZ carries one blend shape per frame.
 
 import bpy
+import bmesh
 import json
 import sys
 
@@ -20,6 +21,14 @@ ACTION_NAME, OUT = argv[0], argv[1]
 
 RIG_NAME = "rig"
 SUBSURF_CAP = 3
+
+# Vertex groups (named exactly, painted by hand in Blender) marking regions
+# that should get ZERO outline-hull inflation in toon mode — e.g. the mouth
+# interior, a concave cavity where full inflation makes the hull poke through
+# the surrounding skin at their shared boundary. Weight ramps smoothly back
+# to 1 (full inflation) over HULL_TAPER_RINGS edge-steps from the seed.
+HULL_TAPER_GROUPS = ("mouth_interior",)
+HULL_TAPER_RINGS = 6
 
 scn = bpy.context.scene
 rig = bpy.data.objects[RIG_NAME]
@@ -88,6 +97,48 @@ def evaluated_mesh(ob):
     return ob.evaluated_get(depsgraph), depsgraph
 
 
+def hull_taper_weights(ob):
+    """One float per BASE-mesh vertex (same order/count as ob.data.vertices):
+    0 at any HULL_TAPER_GROUPS seed, ramping to 1 over HULL_TAPER_RINGS edge
+    hops, 1 everywhere else. None if the mesh has none of those groups.
+    Only valid to index directly against the evaluated/baked mesh when the
+    mesh has no vertex-count-changing modifier (e.g. Subsurf) — true here
+    since only the Armature modifier remains on deforming meshes.
+    """
+    seed_group_indices = [g.index for g in ob.vertex_groups if g.name in HULL_TAPER_GROUPS]
+    if not seed_group_indices:
+        return None
+
+    bm = bmesh.new()
+    bm.from_mesh(ob.data)
+    bm.verts.ensure_lookup_table()
+    deform_layer = bm.verts.layers.deform.verify()
+
+    seeds = [
+        v.index for v in bm.verts
+        if any(gi in v[deform_layer] and v[deform_layer][gi] > 0.5 for gi in seed_group_indices)
+    ]
+
+    dist = {i: 0 for i in seeds}
+    frontier = list(seeds)
+    ring = 0
+    while frontier and ring < HULL_TAPER_RINGS:
+        ring += 1
+        nxt = []
+        for vi in frontier:
+            for e in bm.verts[vi].link_edges:
+                other = e.other_vert(bm.verts[vi]).index
+                if other not in dist:
+                    dist[other] = ring
+                    nxt.append(other)
+        frontier = nxt
+
+    weights = [min(1.0, dist.get(v.index, HULL_TAPER_RINGS) / HULL_TAPER_RINGS)
+               for v in bm.verts]
+    bm.free()
+    return weights
+
+
 def rounded(vals):
     return [round(v, 5) for v in vals]
 
@@ -104,9 +155,10 @@ for name in KEEP_MESHES:
 bpy.context.view_layer.update()
 
 for name in KEEP_MESHES:
-    ob_eval, depsgraph = evaluated_mesh(bpy.data.objects[name])
+    ob = bpy.data.objects[name]
+    ob_eval, depsgraph = evaluated_mesh(ob)
     me = ob_eval.to_mesh(preserve_all_data_layers=False, depsgraph=depsgraph)
-    materials = slot_colors(bpy.data.objects[name])
+    materials = slot_colors(ob)
     counts, indices, face_materials = [], [], []
     for p in me.polygons:
         counts.append(len(p.vertices))
@@ -116,15 +168,22 @@ for name in KEEP_MESHES:
     for v in me.vertices:
         positions.extend(rounded(v.co))
         normals.extend(rounded(v.normal))
+    hull_weight = hull_taper_weights(ob)
+    if hull_weight is not None:
+        assert len(hull_weight) == len(me.vertices), \
+            f"{name}: hull taper vertex count mismatch — a modifier is " \
+            f"changing vertex count (e.g. Subsurf); taper needs 1:1 indexing"
     meshes[name] = {
         "materials": materials, "face_materials": face_materials,
         "counts": counts, "indices": indices,
         "rest": positions, "normals": normals, "frames": [],
+        "hull_weight": hull_weight,
     }
     ob_eval.to_mesh_clear()
     material_count = len(set(face_materials))
+    taper_note = "with hull taper" if hull_weight is not None else "no hull taper"
     print(f"{name}: {len(positions)//3} verts, {len(counts)} faces, "
-          f"{material_count} material(s) in use")
+          f"{material_count} material(s) in use, {taper_note}")
 
 for name in KEEP_MESHES:
     for mod in bpy.data.objects[name].modifiers:

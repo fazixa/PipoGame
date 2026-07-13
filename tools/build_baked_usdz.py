@@ -95,6 +95,20 @@ def main(src, dst):
         mesh.GetSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
         mesh.GetExtentAttr().Set(UsdGeom.PointBased.ComputeExtent(points))
 
+        # Hull taper weight (see blender_bake_export.py's HULL_TAPER_GROUPS):
+        # 0 at e.g. the mouth interior, ramping to 1 a few rings out. Carried
+        # as a vertex color primvar since that's what the toon outline's
+        # Metal geometry modifier can read per-vertex at runtime — it scales
+        # the hull's outward inflation by this value so the ink shell tapers
+        # to nothing right at a concave seam instead of poking through it.
+        # Always authored (defaulting to a uniform 1 = full inflation) so the
+        # shader never has to guess about a missing primvar.
+        hull_weight = m.get("hull_weight") or [1.0] * nverts
+        gprim = UsdGeom.Gprim(mesh)
+        gprim.CreateDisplayColorAttr().Set(
+            Vt.Vec3fArray([Gf.Vec3f(w, w, w) for w in hull_weight]))
+        gprim.GetDisplayColorPrimvar().SetInterpolation(UsdGeom.Tokens.vertex)
+
         # Materials: one per slot the mesh actually uses, bound to their own
         # faces via GeomSubsets. A single whole-mesh material would make any
         # second material (e.g. a mouth interior distinct from the skin)
