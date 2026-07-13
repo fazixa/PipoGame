@@ -18,12 +18,24 @@ import sys
 argv = sys.argv[sys.argv.index("--") + 1:]
 ACTION_NAME, OUT = argv[0], argv[1]
 
-KEEP_MESHES = ("Pipo_Body", "Pipo_Eyes", "Pipo_Mouth")
 RIG_NAME = "rig"
 SUBSURF_CAP = 3
 
 scn = bpy.context.scene
 rig = bpy.data.objects[RIG_NAME]
+
+# Auto-detect every mesh actually deformed by the rig (an Armature modifier
+# targeting it). The model changes over time — meshes get added, renamed,
+# or left as stale unused copies — so this reads whatever is really driven
+# by the rig right now instead of hardcoding names. A mesh that's merely
+# object-parented to the rig with no Armature modifier does NOT move with
+# the animation and is excluded (that's how a stale orphaned copy shows up).
+KEEP_MESHES = tuple(
+    ob.name for ob in bpy.data.objects
+    if ob.type == "MESH" and not ob.name.startswith("cs_")
+    and any(m.type == "ARMATURE" and m.object is rig for m in ob.modifiers)
+)
+print("deforming meshes:", KEEP_MESHES)
 
 action = bpy.data.actions[ACTION_NAME]
 if rig.animation_data is None:

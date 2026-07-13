@@ -20,6 +20,14 @@ import tempfile
 from pxr import Usd, UsdGeom, UsdSkel, UsdShade, Sdf, UsdUtils, Vt, Gf
 
 
+def safe_name(name):
+    # Blender object names (e.g. "finalF.002") aren't valid USD prim names
+    safe = "".join(c if c.isalnum() or c == "_" else "_" for c in name)
+    if safe and safe[0].isdigit():
+        safe = "_" + safe
+    return safe
+
+
 def main(src, dst):
     with open(src) as fp:
         data = json.load(fp)
@@ -62,7 +70,8 @@ def main(src, dst):
     for name, m in data["meshes"].items():
         rest = m["rest"]
         nverts = len(rest) // 3
-        mesh_path = f"/Pipo/{name}"
+        safe = safe_name(name)
+        mesh_path = f"/Pipo/{safe}"
         mesh = UsdGeom.Mesh.Define(stage, mesh_path)
         points = Vt.Vec3fArray([Gf.Vec3f(*rest[i*3:i*3+3]) for i in range(nverts)])
         mesh.GetPointsAttr().Set(points)
@@ -76,8 +85,8 @@ def main(src, dst):
         mesh.GetExtentAttr().Set(UsdGeom.PointBased.ComputeExtent(points))
 
         # material: constant color
-        mat = UsdShade.Material.Define(stage, f"/Materials/{name}")
-        shader = UsdShade.Shader.Define(stage, f"/Materials/{name}/pbr")
+        mat = UsdShade.Material.Define(stage, f"/Materials/{safe}")
+        shader = UsdShade.Shader.Define(stage, f"/Materials/{safe}/pbr")
         shader.CreateIdAttr("UsdPreviewSurface")
         shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
             Gf.Vec3f(*m["color"]))

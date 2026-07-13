@@ -46,11 +46,15 @@ final class PipoController: ObservableObject {
     private var anchor: AnchorEntity?
     private var pipo: Entity?
 
-    // Rigged-clip playback
+    // Rigged-clip playback. The current model ships only a looping sit clip;
+    // walking is a glide until a walk cycle is authored (usesClips false).
+    private var isRigged = false
     private var animationOwner: Entity?
     private var walkClip: AnimationResource?
     private var walkClipDuration: TimeInterval = 1
     private var walkPlayback: AnimationPlaybackController?
+    private var sitClip: AnimationResource?
+    private var sitPlayback: AnimationPlaybackController?
     private var usesClips: Bool { walkClip != nil }
 
     // Toon look
@@ -95,9 +99,32 @@ final class PipoController: ObservableObject {
         guard supportsSit else { return }
         switch state {
         case .sitting:
+            if isRigged {
+                sitPlayback?.stop(blendOutDuration: 0.3)
+                sitPlayback = nil
+                outlinePlayback?.stop(blendOutDuration: 0.3)
+                outlinePlayback = nil
+            }
             state = .idle
             isSitting = false
         case .idle, .walking, .stoppingWalk:
+            if isRigged {
+                guard let clip = sitClip, let owner = animationOwner else { return }
+                walkPlayback?.stop(blendOutDuration: 0.2)
+                walkPlayback = nil
+                sitPlayback = owner.playAnimation(clip.repeat(),
+                                                  transitionDuration: 0.3,
+                                                  startsPaused: false)
+                // Outline shell loops the same clip in lockstep
+                if let oOwner = outlineAnimOwner, let oClip = outlineClip {
+                    outlinePlayback?.stop(blendOutDuration: 0.2)
+                    let playback = oOwner.playAnimation(oClip.repeat(),
+                                                        transitionDuration: 0.3,
+                                                        startsPaused: false)
+                    playback.time = sitPlayback?.time ?? 0
+                    outlinePlayback = playback
+                }
+            }
             state = .sitting
             isSitting = true
         case .unplaced, .handFollowing:
@@ -162,8 +189,9 @@ final class PipoController: ObservableObject {
         guard let clone = toonStyle.apply(to: pipo) else { return }
         outlineAnimOwner = firstEntityWithAnimations(in: clone)
         outlineClip = outlineAnimOwner?.availableAnimations.first
-        // Match whatever the body is doing right now (walking or frozen pose)
-        if let bodyPlayback = walkPlayback, bodyPlayback.isValid,
+        // Match whatever the body is doing right now (sitting loop, walking,
+        // or a frozen pose)
+        if let bodyPlayback = sitPlayback ?? walkPlayback, bodyPlayback.isValid,
            let owner = outlineAnimOwner, let clip = outlineClip {
             let playback = owner.playAnimation(clip.repeat(),
                                                transitionDuration: 0,
@@ -203,9 +231,12 @@ final class PipoController: ObservableObject {
         anchor?.removeFromParent()
         anchor = nil
         pipo = nil
+        isRigged = false
         animationOwner = nil
         walkClip = nil
         walkPlayback = nil
+        sitClip = nil
+        sitPlayback = nil
         state = .unplaced
         isPlaced = false
         isSitting = false
@@ -218,13 +249,16 @@ final class PipoController: ObservableObject {
         let pipo: Entity
         if let loaded = PipoAsset.load() {
             pipo = loaded.root
+            isRigged = true
             animationOwner = loaded.animationOwner
             walkClip = loaded.walkClip
-            walkClipDuration = loaded.walkClip.definition.duration
-            supportsSit = false
+            walkClipDuration = loaded.walkClip?.definition.duration ?? 1
+            sitClip = loaded.sitClip
+            supportsSit = loaded.sitClip != nil
             supportsToon = true
         } else {
             pipo = PipoBuilder.build()
+            isRigged = false
             supportsSit = true
         }
 
@@ -269,7 +303,7 @@ final class PipoController: ObservableObject {
             break
 
         case .idle:
-            if !usesClips { animateIdle(pipo: pipo, dt: dt) }
+            if !isRigged { animateIdle(pipo: pipo, dt: dt) }
 
         case .walking(let target):
             walk(pipo: pipo, toward: target, dt: dt)
@@ -278,7 +312,7 @@ final class PipoController: ObservableObject {
             freezeWalkClipAtContactFrame()
 
         case .sitting:
-            if !usesClips { animateSit(pipo: pipo, dt: dt) }
+            if !isRigged { animateSit(pipo: pipo, dt: dt) }
 
         case .handFollowing:
             followHand(pipo: pipo, dt: dt)
@@ -342,9 +376,10 @@ final class PipoController: ObservableObject {
 
         if usesClips {
             startWalkClipIfNeeded()
-        } else {
+        } else if !isRigged {
             animateGait(pipo: pipo, dt: dt)
         }
+        // Rigged model without a walk clip: he glides in rest pose for now.
     }
 
     private func groundHeight(at position: SIMD3<Float>) -> Float? {

@@ -9,11 +9,18 @@ enum PipoAsset {
     /// Model is ~4.5 m tall in the USDZ; this brings him to roughly 15 cm.
     static let worldScale: Float = 0.034
 
+    /// What the single baked clip inside Pipo.usdz is. The current model
+    /// ships with only a sit animation (a head-sway loop); flip this back
+    /// to .walk (or extend to multiple files) when more clips are authored.
+    enum BundledClip { case walk, sit }
+    static let bundledClip: BundledClip = .sit
+
     struct LoadedPipo {
         let root: Entity
         /// The entity that owns the animation clips (usually a child SkelRoot).
         let animationOwner: Entity
-        let walkClip: AnimationResource
+        let walkClip: AnimationResource?
+        let sitClip: AnimationResource?
     }
 
     static func load() -> LoadedPipo? {
@@ -26,7 +33,10 @@ enum PipoAsset {
               let clip = owner.availableAnimations.first else {
             return nil
         }
-        return LoadedPipo(root: root, animationOwner: owner, walkClip: clip)
+        return LoadedPipo(root: root,
+                          animationOwner: owner,
+                          walkClip: bundledClip == .walk ? clip : nil,
+                          sitClip: bundledClip == .sit ? clip : nil)
     }
 
     private static func firstEntityWithAnimations(in entity: Entity) -> Entity? {
