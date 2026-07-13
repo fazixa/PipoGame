@@ -12,8 +12,9 @@ final class HandTracker: NSObject, ARSessionDelegate {
 
     /// Smoothed palm position in world space; nil until first detection.
     private(set) var palmWorldPosition: SIMD3<Float>?
-    /// Smoothed horizontal direction the fingers point (wrist -> middle
-    /// knuckle) in world space; drives Pipo's yaw so he turns with the hand.
+    /// Smoothed horizontal direction from the wrist toward the knuckles
+    /// (averaged across all four, not just one) in world space; drives
+    /// Pipo's yaw so he turns with the hand.
     private(set) var palmDirection: SIMD3<Float>?
     private var lastDetectionTime: CFTimeInterval = 0
 
@@ -114,19 +115,32 @@ final class HandTracker: NSObject, ARSessionDelegate {
 
         guard let world = unproject(palmOriented) else { return }
 
-        // Hand orientation: wrist -> middle knuckle, flattened to the ground
-        // plane. Falls back to the previous direction when either joint's
-        // depth sample is unusable.
+        // Hand orientation: wrist -> average of the four finger-base
+        // knuckles, flattened to the ground plane. Averaging across all
+        // four (rather than a single wrist->middleMCP vector) is far less
+        // sensitive to any one landmark's detection noise, since the wrist
+        // point in particular tends to wobble near the forearm edge.
         var direction: SIMD3<Float>?
         if let wrist = try? hand.recognizedPoint(.wrist), wrist.confidence > 0.3,
-           let middle = try? hand.recognizedPoint(.middleMCP), middle.confidence > 0.3,
-           let wristWorld = unproject(SIMD2(Float(wrist.location.x), Float(wrist.location.y))),
-           let middleWorld = unproject(SIMD2(Float(middle.location.x), Float(middle.location.y))) {
-            var d = middleWorld - wristWorld
-            d.y = 0
-            let len = simd_length(d)
-            if len > 0.02 {
-                direction = d / len
+           let wristWorld = unproject(SIMD2(Float(wrist.location.x), Float(wrist.location.y))) {
+            let knuckleNames: [VNHumanHandPoseObservation.JointName] =
+                [.indexMCP, .middleMCP, .ringMCP, .littleMCP]
+            var knuckleSum = SIMD3<Float>.zero
+            var knuckleCount: Float = 0
+            for name in knuckleNames {
+                guard let point = try? hand.recognizedPoint(name), point.confidence > 0.3,
+                      let knuckleWorld = unproject(SIMD2(Float(point.location.x), Float(point.location.y)))
+                else { continue }
+                knuckleSum += knuckleWorld
+                knuckleCount += 1
+            }
+            if knuckleCount >= 2 {
+                var d = (knuckleSum / knuckleCount) - wristWorld
+                d.y = 0
+                let len = simd_length(d)
+                if len > 0.02 {
+                    direction = d / len
+                }
             }
         }
 
