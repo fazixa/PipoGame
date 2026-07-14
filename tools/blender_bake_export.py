@@ -143,6 +143,27 @@ def rounded(vals):
     return [round(v, 5) for v in vals]
 
 
+def vertex_uvs(ob, me, nverts):
+    """One (u, v) per vertex, taken from the first face-corner (loop) that
+    touches it. UVs are natively per-loop in Blender (a vertex on a UV seam
+    has a different value per adjacent face) — collapsing to one-per-vertex
+    to match this pipeline's vertex-indexed positions/normals means a seam
+    vertex's neighbors will show minor texture stretching right at the seam.
+    Fine for a subtle bump map; would need a real per-loop vertex-splitting
+    rework (much larger change) for anything sharper. None if unwrapped.
+    """
+    uv_layer = me.uv_layers.active
+    if uv_layer is None:
+        return None
+    uvs = [None] * nverts
+    for loop in me.loops:
+        vi = loop.vertex_index
+        if uvs[vi] is None:
+            uv = uv_layer.data[loop.index].uv
+            uvs[vi] = [round(uv.x, 5), round(uv.y, 5)]
+    return [uv if uv is not None else [0.0, 0.0] for uv in uvs]
+
+
 meshes = {}
 
 # Rest topology + positions: armature disabled, subsurf still on
@@ -173,17 +194,19 @@ for name in KEEP_MESHES:
         assert len(hull_weight) == len(me.vertices), \
             f"{name}: hull taper vertex count mismatch — a modifier is " \
             f"changing vertex count (e.g. Subsurf); taper needs 1:1 indexing"
+    uvs = vertex_uvs(ob, me, len(me.vertices))
     meshes[name] = {
         "materials": materials, "face_materials": face_materials,
         "counts": counts, "indices": indices,
         "rest": positions, "normals": normals, "frames": [],
-        "hull_weight": hull_weight,
+        "hull_weight": hull_weight, "uvs": uvs,
     }
     ob_eval.to_mesh_clear()
     material_count = len(set(face_materials))
+    uv_note = "with UVs" if uvs is not None else "no UVs"
     taper_note = "with hull taper" if hull_weight is not None else "no hull taper"
     print(f"{name}: {len(positions)//3} verts, {len(counts)} faces, "
-          f"{material_count} material(s) in use, {taper_note}")
+          f"{material_count} material(s) in use, {taper_note}, {uv_note}")
 
 for name in KEEP_MESHES:
     for mod in bpy.data.objects[name].modifiers:

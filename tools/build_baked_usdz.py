@@ -123,6 +123,16 @@ def main(src, dst):
             Vt.Vec3fArray([Gf.Vec3f(w, w, w) for w in hull_weight]))
         gprim.GetDisplayColorPrimvar().SetInterpolation(UsdGeom.Tokens.vertex)
 
+        # UVs (see blender_bake_export.py's vertex_uvs — one per vertex, the
+        # first face-corner touching it, so seam vertices get a slightly
+        # approximate value). Only authored when the mesh was unwrapped.
+        uvs = m.get("uvs")
+        if uvs:
+            primvars_api = UsdGeom.PrimvarsAPI(mesh.GetPrim())
+            st_primvar = primvars_api.CreatePrimvar(
+                "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex)
+            st_primvar.Set(Vt.Vec2fArray([Gf.Vec2f(uv[0], uv[1]) for uv in uvs]))
+
         # Materials: one per slot the mesh actually uses, bound to their own
         # faces via GeomSubsets. A single whole-mesh material would make any
         # second material (e.g. a mouth interior distinct from the skin)

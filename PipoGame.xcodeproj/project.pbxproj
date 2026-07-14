@@ -10,12 +10,15 @@
 		0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4812E2D24072F30671570668 /* ScreenRecorder.swift */; };
 		13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = DB7D83D29C503B65E76F174D /* Pipo.usdz */; };
 		16F8BDD1A44818EDE4B5C34E /* HandTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D6B6375EE46EA8FB8A0A8F4 /* HandTracker.swift */; };
+		2305A190AF8C8F88BF817E5B /* PipoBumpRoughness.png in Resources */ = {isa = PBXBuildFile; fileRef = 9B615216249859617A987DB2 /* PipoBumpRoughness.png */; };
 		32989C1684D53131F4FF8280 /* ToonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */; };
 		3F70EC7A55DBE9337FD5F845 /* ARCoreGeospatial in Frameworks */ = {isa = PBXBuildFile; productRef = 5D56129B2AB73A3D9A32523E /* ARCoreGeospatial */; };
 		4CC3D6C360B88BB0FF0FCE9D /* GeospatialManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA575143B6CD9FD0C55A514C /* GeospatialManager.swift */; };
 		866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030D1E6608E3E43A464A3336 /* ARViewContainer.swift */; };
+		95687A3B3017B10BD6C45958 /* PipoBumpNormal.png in Resources */ = {isa = PBXBuildFile; fileRef = 3934CCFB18CD26D468CC6C87 /* PipoBumpNormal.png */; };
 		991C06BF13433666BC5AC29C /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5B9A036E4DACE0CE732B0DBF /* Shaders.metal */; };
 		ABF973AD58B82E566AB8EB0B /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B36ADF9DB382291B734D1C3 /* Secrets.swift */; };
+		B55DE38D693E4E0D213B67B9 /* BumpyStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B31F734CF51B6B8F958BF7 /* BumpyStyle.swift */; };
 		D554773950E13F128CB326FA /* PipoAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A380F57777D8DF30632D7FB1 /* PipoAsset.swift */; };
 		D6735C8120071C3614BEFC0D /* PipoGameApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3597C6801AA242234D6077A /* PipoGameApp.swift */; };
 		D6BC045CBDF1801AF8E903F7 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEA526BF4F634AF3D407FF0 /* ContentView.swift */; };
@@ -25,7 +28,9 @@
 
 /* Begin PBXFileReference section */
 		030D1E6608E3E43A464A3336 /* ARViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARViewContainer.swift; sourceTree = "<group>"; };
+		03B31F734CF51B6B8F958BF7 /* BumpyStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BumpyStyle.swift; sourceTree = "<group>"; };
 		137F4E6E2FB64259EFA56AA9 /* PipoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoController.swift; sourceTree = "<group>"; };
+		3934CCFB18CD26D468CC6C87 /* PipoBumpNormal.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = PipoBumpNormal.png; sourceTree = "<group>"; };
 		4812E2D24072F30671570668 /* ScreenRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecorder.swift; sourceTree = "<group>"; };
 		4B36ADF9DB382291B734D1C3 /* Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Secrets.swift; sourceTree = "<group>"; };
 		4D6B6375EE46EA8FB8A0A8F4 /* HandTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandTracker.swift; sourceTree = "<group>"; };
@@ -33,6 +38,7 @@
 		6259E7E2DDA6889E1029CA3E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6EEA526BF4F634AF3D407FF0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		79929F788216D50FA536CFD4 /* PipoGame.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PipoGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9B615216249859617A987DB2 /* PipoBumpRoughness.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = PipoBumpRoughness.png; sourceTree = "<group>"; };
 		A380F57777D8DF30632D7FB1 /* PipoAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoAsset.swift; sourceTree = "<group>"; };
 		C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToonStyle.swift; sourceTree = "<group>"; };
 		CA575143B6CD9FD0C55A514C /* GeospatialManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeospatialManager.swift; sourceTree = "<group>"; };
@@ -57,6 +63,8 @@
 			isa = PBXGroup;
 			children = (
 				DB7D83D29C503B65E76F174D /* Pipo.usdz */,
+				3934CCFB18CD26D468CC6C87 /* PipoBumpNormal.png */,
+				9B615216249859617A987DB2 /* PipoBumpRoughness.png */,
 			);
 			path = Assets;
 			sourceTree = "<group>";
@@ -73,6 +81,7 @@
 			isa = PBXGroup;
 			children = (
 				030D1E6608E3E43A464A3336 /* ARViewContainer.swift */,
+				03B31F734CF51B6B8F958BF7 /* BumpyStyle.swift */,
 				6EEA526BF4F634AF3D407FF0 /* ContentView.swift */,
 				CA575143B6CD9FD0C55A514C /* GeospatialManager.swift */,
 				4D6B6375EE46EA8FB8A0A8F4 /* HandTracker.swift */,
@@ -164,6 +173,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */,
+				95687A3B3017B10BD6C45958 /* PipoBumpNormal.png in Resources */,
+				2305A190AF8C8F88BF817E5B /* PipoBumpRoughness.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -175,6 +186,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */,
+				B55DE38D693E4E0D213B67B9 /* BumpyStyle.swift in Sources */,
 				D6BC045CBDF1801AF8E903F7 /* ContentView.swift in Sources */,
 				4CC3D6C360B88BB0FF0FCE9D /* GeospatialManager.swift in Sources */,
 				16F8BDD1A44818EDE4B5C34E /* HandTracker.swift in Sources */,

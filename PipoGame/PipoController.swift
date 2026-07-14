@@ -31,6 +31,9 @@ final class PipoController: ObservableObject {
     @Published var isToon = false
     /// Toon mode needs the clip-driven Pipo (the outline shell syncs clips).
     @Published var supportsToon = false
+    /// Textured-skin look (fingerprint bump + noise displacement) — mutually
+    /// exclusive with toon, picked from the same brush menu.
+    @Published var isBumpy = false
     @Published var isHandMode = false
     /// True while hand mode is on but no palm is currently detected.
     @Published var searchingForHand = false
@@ -66,6 +69,7 @@ final class PipoController: ObservableObject {
 
     // Toon look
     private let toonStyle = ToonStyle()
+    private let bumpyStyle = BumpyStyle()
     private var outlineAnimOwner: Entity?
     private var outlineClip: AnimationResource?
     private var outlinePlayback: AnimationPlaybackController?
@@ -116,17 +120,11 @@ final class PipoController: ObservableObject {
     }
 
     private var isDragging = false
-    /// World-space offset between Pipo's origin (his feet) and wherever the
-    /// drag actually grabbed him, captured at the start of a normal-mode
-    /// drag so he doesn't snap his feet to the new raycast hit each frame —
-    /// the point you grabbed stays under your finger.
-    private var dragGrabOffset: SIMD3<Float> = .zero
 
     /// Starts a one-finger drag anywhere on screen — doesn't matter where
-    /// relative to Pipo, since the drag moves him by the same relative
-    /// amount the finger moves, not by snapping him to the touch point.
+    /// relative to Pipo.
     func beginDrag(at screenPoint: CGPoint) -> Bool {
-        guard let pipo, let arView else { return false }
+        guard pipo != nil, arView != nil else { return false }
         switch state {
         case .unplaced, .handFollowing:
             return false
@@ -144,14 +142,6 @@ final class PipoController: ObservableObject {
             state = .idle
         }
 
-        if !isGeoAnchored,
-           let result = arView.raycast(from: screenPoint, allowing: .estimatedPlane,
-                                       alignment: .any).first {
-            let hit = result.worldTransform.columns.3
-            dragGrabOffset = pipo.position(relativeTo: nil) - SIMD3<Float>(hit.x, hit.y, hit.z)
-        } else {
-            dragGrabOffset = .zero
-        }
         isDragging = true
         return true
     }
@@ -160,10 +150,11 @@ final class PipoController: ObservableObject {
         isZAxisDragMode.toggle()
     }
 
-    /// One-finger drag. Normal placement keeps its original behavior: slide
-    /// along whatever real surface (table, floor) he's standing on, via an
-    /// ARKit plane raycast at the touch point — same as tap-to-place always
-    /// did. Geospatial placement has no nearby surface to slide along, so it
+    /// One-finger drag. Normal placement always keeps him grounded: his root
+    /// snaps directly to wherever the ARKit plane raycast hits under the
+    /// touch point, every frame, no matter where on his body you grabbed —
+    /// dragging him across a surface should never leave him floating above
+    /// it. Geospatial placement has no nearby surface to slide along, so it
     /// instead uses camera-relative offset math: left/right/up normally, or
     /// push/pull along camera depth in Z-axis mode (drag up = away, drag
     /// down = closer) — an explicit mode switch rather than trying to read
@@ -175,7 +166,7 @@ final class PipoController: ObservableObject {
                   let result = arView.raycast(from: screenPoint, allowing: .estimatedPlane,
                                               alignment: .any).first else { return }
             let t = result.worldTransform.columns.3
-            pipo?.setPosition(SIMD3<Float>(t.x, t.y, t.z) + dragGrabOffset, relativeTo: nil)
+            pipo?.setPosition(SIMD3<Float>(t.x, t.y, t.z), relativeTo: nil)
             return
         }
         if isZAxisDragMode {
@@ -302,6 +293,10 @@ final class PipoController: ObservableObject {
             isToon = false
             return
         }
+        if isBumpy {
+            bumpyStyle.remove()
+            isBumpy = false
+        }
         guard let clone = toonStyle.apply(to: pipo) else { return }
         outlineAnimOwner = firstEntityWithAnimations(in: clone)
         outlineClip = outlineAnimOwner?.availableAnimations.first
@@ -317,6 +312,24 @@ final class PipoController: ObservableObject {
             outlinePlayback = playback
         }
         isToon = true
+    }
+
+    func toggleBumpy() {
+        guard let pipo, supportsToon else { return }
+        if isBumpy {
+            bumpyStyle.remove()
+            isBumpy = false
+            return
+        }
+        if isToon {
+            toonStyle.remove()
+            outlineAnimOwner = nil
+            outlineClip = nil
+            outlinePlayback = nil
+            isToon = false
+        }
+        bumpyStyle.apply(to: pipo)
+        isBumpy = true
     }
 
     private func firstEntityWithAnimations(in entity: Entity) -> Entity? {
@@ -355,6 +368,8 @@ final class PipoController: ObservableObject {
         outlineClip = nil
         outlinePlayback = nil
         isToon = false
+        bumpyStyle.remove()
+        isBumpy = false
         supportsToon = false
         anchor?.removeFromParent()
         anchor = nil

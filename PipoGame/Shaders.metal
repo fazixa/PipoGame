@@ -66,6 +66,89 @@ void pipoFaceSurface(realitykit::surface_parameters params)
     params.surface().set_emissive_color(c);
 }
 
+// Layered value noise ("clouds" style) — cheap, dependency-free stand-in for
+// Perlin noise. Smooth-interpolated hash lattice, good enough for a subtle
+// surface bump; not true gradient (Perlin) noise, but visually equivalent at
+// this scale.
+inline float pipoHash3(float3 p)
+{
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+inline float pipoNoise3(float3 p)
+{
+    float3 i = floor(p);
+    float3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = pipoHash3(i + float3(0, 0, 0));
+    float n100 = pipoHash3(i + float3(1, 0, 0));
+    float n010 = pipoHash3(i + float3(0, 1, 0));
+    float n110 = pipoHash3(i + float3(1, 1, 0));
+    float n001 = pipoHash3(i + float3(0, 0, 1));
+    float n101 = pipoHash3(i + float3(1, 0, 1));
+    float n011 = pipoHash3(i + float3(0, 1, 1));
+    float n111 = pipoHash3(i + float3(1, 1, 1));
+    float nx00 = mix(n000, n100, f.x);
+    float nx10 = mix(n010, n110, f.x);
+    float nx01 = mix(n001, n101, f.x);
+    float nx11 = mix(n011, n111, f.x);
+    float nxy0 = mix(nx00, nx10, f.y);
+    float nxy1 = mix(nx01, nx11, f.y);
+    return mix(nxy0, nxy1, f.z);
+}
+
+// Subtle surface bump: nudges each vertex along its own normal by a cloud-
+// noise value sampled at its model-space position, so the pattern is fixed
+// to the mesh (rides along with blend-shape deformation) rather than
+// swimming in world space.
+//
+// custom_parameter() = (noise scale — bumps per model unit, displacement
+// strength in model units, 0, 0).
+[[visible]]
+void pipoNoiseDisplaceGeometry(realitykit::geometry_parameters params)
+{
+    float4 cp = params.uniforms().custom_parameter();
+    float scale = cp.x;
+    float strength = cp.y;
+    float3 pos = params.geometry().model_position();
+    float3 n = normalize(params.geometry().normal());
+    float noiseValue = pipoNoise3(pos * scale) * 2.0 - 1.0;
+    params.geometry().set_model_position_offset(n * noiseValue * strength);
+}
+
+// Height-map bump: nudges each vertex along its own normal by a sample from
+// a real grayscale texture (bound as CustomMaterial's "custom" slot), read
+// at that vertex's UV — an alternative to pipoNoiseDisplaceGeometry's
+// procedural noise when you want an actual painted/photographed height map
+// (e.g. a fingerprint/pebble texture) instead of tunable noise parameters.
+// UV tiling and displacement strength are both runtime-adjustable so the
+// same shader works at any scale without recompiling.
+//
+// custom_parameter() = (UV tiling repeats, displacement strength in model
+// units, 0, 0).
+[[visible]]
+void pipoHeightMapDisplaceGeometry(realitykit::geometry_parameters params)
+{
+    float4 cp = params.uniforms().custom_parameter();
+    float tiling = cp.x;
+    float strength = cp.y;
+
+    float2 uv = params.geometry().uv0() * tiling;
+    uv = fract(uv);
+    // USD/USDZ textures have a bottom-left origin; Metal samples top-left.
+    uv.y = 1.0 - uv.y;
+
+    constexpr sampler heightSampler(coord::normalized, address::repeat,
+                                    filter::linear, mip_filter::linear);
+    half4 sample = params.textures().custom().sample(heightSampler, uv);
+    float height = float(sample.r) * 2.0 - 1.0;
+
+    float3 n = normalize(params.geometry().normal());
+    params.geometry().set_model_position_offset(n * height * strength);
+}
+
 // Flat ink color — darker wine-pink derived from Pipo's body color. Faded
 // out by the same taper weight the geometry modifier uses (see
 // pipoOutlineGeometry): scaling the push alone still leaves these faces at

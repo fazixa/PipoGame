@@ -47,10 +47,21 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity)
                         }
 
-                        Button {
-                            controller.toggleToon()
+                        Menu {
+                            Button {
+                                controller.toggleToon()
+                            } label: {
+                                Label("Toon Outline", systemImage: controller.isToon
+                                      ? "checkmark.circle.fill" : "circle")
+                            }
+                            Button {
+                                controller.toggleBumpy()
+                            } label: {
+                                Label("Bumpy Texture", systemImage: controller.isBumpy
+                                      ? "checkmark.circle.fill" : "circle")
+                            }
                         } label: {
-                            Image(systemName: controller.isToon
+                            Image(systemName: (controller.isToon || controller.isBumpy)
                                   ? "paintbrush.fill" : "paintbrush")
                                 .frame(maxWidth: .infinity)
                         }
