@@ -20,6 +20,13 @@
 	<string>1</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Pipo needs the camera to see the world and stand in it.</string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>PipoGeospatialPrecision</key>
+		<string>Precise location lets Pipo line up accurately with real buildings.</string>
+	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Pipo needs your location to place him on real buildings around you.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Recordings of Pipo are saved to your Photos library.</string>
 	<key>UILaunchScreen</key>

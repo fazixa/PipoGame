@@ -34,8 +34,15 @@ final class PipoController: ObservableObject {
     @Published var isHandMode = false
     /// True while hand mode is on but no palm is currently detected.
     @Published var searchingForHand = false
+    @Published var isGeoActive = false
+    /// When on, the one-finger drag pushes/pulls Pipo along camera depth
+    /// instead of moving him left/right/up — a single 2D drag can't
+    /// disambiguate 3 axes at once, so this is an explicit mode switch
+    /// rather than trying to read it from a second simultaneous gesture.
+    @Published var isZAxisDragMode = false
 
     weak var handTracker: HandTracker?
+    let geospatial = GeospatialManager()
 
     /// Set by ContentView; used to stop recording without on-screen UI.
     var onLongPress: (() -> Void)?
@@ -67,6 +74,19 @@ final class PipoController: ObservableObject {
     private var walkPhase: Float = 0
     private var baseScale: Float = 1
 
+    // Geospatial ("giant Pipo among buildings") mode
+    private var isGeoAnchored = false
+    /// Manual drag offset (world-space), on top of wherever ARCore's live
+    /// tracking puts the anchor — reset on each new placement.
+    private var geoOffset: SIMD3<Float> = .zero
+    /// Multiplier over his natural (~15cm) size when pinned to a distant
+    /// building — otherwise he'd be sub-pixel at that range.
+    private let geoGiantScale: Float = 150
+    /// Extra multiplier on top of the base drag sensitivity, just for
+    /// Z-axis depth — moving him between distant buildings means covering
+    /// city-block distances, not fine nudges.
+    private let zAxisDragMultiplier: Float = 25
+
     // Ground speed matches the walk cycle's stride at natural size; both
     // scale with pinch so feet don't slide when Pipo is giant or tiny.
     private var scaleFactor: Float {
@@ -93,6 +113,97 @@ final class PipoController: ObservableObject {
             state = .walking(target: [t.x, t.y, t.z])
             startWalkClipIfNeeded()
         }
+    }
+
+    private var isDragging = false
+    /// World-space offset between Pipo's origin (his feet) and wherever the
+    /// drag actually grabbed him, captured at the start of a normal-mode
+    /// drag so he doesn't snap his feet to the new raycast hit each frame —
+    /// the point you grabbed stays under your finger.
+    private var dragGrabOffset: SIMD3<Float> = .zero
+
+    /// Starts a one-finger drag anywhere on screen — doesn't matter where
+    /// relative to Pipo, since the drag moves him by the same relative
+    /// amount the finger moves, not by snapping him to the touch point.
+    func beginDrag(at screenPoint: CGPoint) -> Bool {
+        guard let pipo, let arView else { return false }
+        switch state {
+        case .unplaced, .handFollowing:
+            return false
+        default:
+            break
+        }
+
+        if case .walking = state {
+            walkPlayback?.stop(blendOutDuration: 0.2)
+            walkPlayback = nil
+            state = .idle
+        } else if case .stoppingWalk = state {
+            walkPlayback?.stop(blendOutDuration: 0.2)
+            walkPlayback = nil
+            state = .idle
+        }
+
+        if !isGeoAnchored,
+           let result = arView.raycast(from: screenPoint, allowing: .estimatedPlane,
+                                       alignment: .any).first {
+            let hit = result.worldTransform.columns.3
+            dragGrabOffset = pipo.position(relativeTo: nil) - SIMD3<Float>(hit.x, hit.y, hit.z)
+        } else {
+            dragGrabOffset = .zero
+        }
+        isDragging = true
+        return true
+    }
+
+    func toggleZAxisDragMode() {
+        isZAxisDragMode.toggle()
+    }
+
+    /// One-finger drag. Normal placement keeps its original behavior: slide
+    /// along whatever real surface (table, floor) he's standing on, via an
+    /// ARKit plane raycast at the touch point — same as tap-to-place always
+    /// did. Geospatial placement has no nearby surface to slide along, so it
+    /// instead uses camera-relative offset math: left/right/up normally, or
+    /// push/pull along camera depth in Z-axis mode (drag up = away, drag
+    /// down = closer) — an explicit mode switch rather than trying to read
+    /// a third axis out of one 2D gesture.
+    func dragBy(_ delta: CGPoint, at screenPoint: CGPoint) {
+        guard isDragging else { return }
+        guard isGeoAnchored else {
+            guard let arView,
+                  let result = arView.raycast(from: screenPoint, allowing: .estimatedPlane,
+                                              alignment: .any).first else { return }
+            let t = result.worldTransform.columns.3
+            pipo?.setPosition(SIMD3<Float>(t.x, t.y, t.z) + dragGrabOffset, relativeTo: nil)
+            return
+        }
+        if isZAxisDragMode {
+            // Depth needs to cover city-block/kilometer distances, not the
+            // fine nudges lateral positioning wants, so it gets a much
+            // bigger multiplier than the shared base sensitivity.
+            applyCameraRelativeOffset(right: 0, up: 0, forward: Float(-delta.y) * zAxisDragMultiplier)
+        } else {
+            applyCameraRelativeOffset(right: Float(delta.x), up: Float(-delta.y), forward: 0)
+        }
+    }
+
+    func endDrag() {
+        isDragging = false
+    }
+
+    /// Geospatial drag math only (see dragBy) — accumulates into `geoOffset`,
+    /// which update() re-applies on top of ARCore's live tracking every
+    /// frame. Writing directly to the anchor's position here would just get
+    /// overwritten next frame.
+    private func applyCameraRelativeOffset(right: Float, up: Float, forward: Float) {
+        guard let arView else { return }
+        let cam = arView.cameraTransform.matrix
+        let rightAxis = SIMD3<Float>(cam.columns.0.x, cam.columns.0.y, cam.columns.0.z)
+        let upAxis = SIMD3<Float>(cam.columns.1.x, cam.columns.1.y, cam.columns.1.z)
+        let forwardAxis = -SIMD3<Float>(cam.columns.2.x, cam.columns.2.y, cam.columns.2.z)
+        let sensitivity: Float = 0.0015 * scaleFactor
+        geoOffset += (rightAxis * right + upAxis * up + forwardAxis * forward) * sensitivity
     }
 
     func toggleSit() {
@@ -136,6 +247,11 @@ final class PipoController: ObservableObject {
 
     func toggleHandMode() {
         isHandMode ? exitHandMode() : enterHandMode()
+    }
+
+    func toggleGeospatial() {
+        isGeoActive.toggle()
+        geospatial.enabled = isGeoActive
     }
 
     private func enterHandMode() {
@@ -211,10 +327,14 @@ final class PipoController: ObservableObject {
         return nil
     }
 
-    /// Pinch-to-scale, clamped to 0.2x–10x of Pipo's natural size.
+    /// Pinch-to-scale, clamped to 0.2x–400x of Pipo's natural size normally.
+    /// Geospatial mode gets a much higher ceiling (5000x, i.e. skyscraper
+    /// scale) — standing him among distant buildings is the whole point,
+    /// and 400x wasn't enough headroom for that.
     func pinch(by factor: Float) {
         guard let pipo else { return }
-        let scaled = min(max(pipo.scale.x * factor, baseScale * 0.2), baseScale * 10)
+        let maxMultiplier: Float = isGeoAnchored ? 5000 : 400
+        let scaled = min(max(pipo.scale.x * factor, baseScale * 0.2), baseScale * maxMultiplier)
         pipo.scale = SIMD3<Float>(repeating: scaled)
     }
 
@@ -239,6 +359,8 @@ final class PipoController: ObservableObject {
         anchor?.removeFromParent()
         anchor = nil
         pipo = nil
+        isGeoAnchored = false
+        geoOffset = .zero
         isRigged = false
         animationOwner = nil
         walkClip = nil
@@ -251,9 +373,7 @@ final class PipoController: ObservableObject {
         supportsSit = true
     }
 
-    private func place(at transform: simd_float4x4) {
-        guard let arView else { return }
-
+    private func loadFreshPipoEntity() -> Entity {
         let pipo: Entity
         if let loaded = PipoAsset.load() {
             pipo = loaded.root
@@ -269,6 +389,12 @@ final class PipoController: ObservableObject {
             isRigged = false
             supportsSit = true
         }
+        return pipo
+    }
+
+    private func place(at transform: simd_float4x4) {
+        guard let arView else { return }
+        let pipo = loadFreshPipoEntity()
 
         let anchor = AnchorEntity(world: transform)
 
@@ -295,6 +421,51 @@ final class PipoController: ObservableObject {
         isPlaced = true
     }
 
+    /// Pins Pipo (giant-scaled) to a real building, via a raycast against
+    /// ARCore's Streetscape Geometry rather than ARKit's near-field plane —
+    /// that's what makes "stand him between two distant buildings" possible
+    /// at all. Re-tapping while already geo-anchored moves him to the new
+    /// spot instead of spawning a second Pipo.
+    func placeGeospatial(from arView: ARView, at point: CGPoint) {
+        guard geospatial.placeAnchor(from: arView, at: point),
+              let hit = geospatial.placedAnchor?.transform else { return }
+        // Use only the hit's POSITION — its rotation encodes the building
+        // facade's surface normal, which pinned Pipo flat against the wall
+        // at whatever angle that surface happened to be (read as "placed
+        // perpendicularly"). He should stand upright, not lie on the facade.
+        geoOffset = .zero
+        let hitPos = SIMD3<Float>(hit.columns.3.x, hit.columns.3.y, hit.columns.3.z)
+        let upright = uprightTransform(at: hitPos, arView: arView)
+
+        if let pipo, let anchor {
+            anchor.setTransformMatrix(upright, relativeTo: nil)
+            let giant = baseScale * geoGiantScale
+            pipo.scale = SIMD3<Float>(repeating: giant)
+        } else {
+            let pipo = loadFreshPipoEntity()
+            let anchor = AnchorEntity(world: upright)
+            let finalScale = pipo.scale
+            baseScale = finalScale.x
+            pipo.scale = finalScale * geoGiantScale
+            anchor.addChild(pipo)
+            arView.scene.addAnchor(anchor)
+            self.anchor = anchor
+            self.pipo = pipo
+            state = .idle
+            isPlaced = true
+        }
+        isGeoAnchored = true
+    }
+
+    /// World transform standing upright at `position`, facing the camera —
+    /// same convention as the near-field place(at:) pop-in.
+    private func uprightTransform(at position: SIMD3<Float>, arView: ARView) -> simd_float4x4 {
+        let toCamera = arView.cameraTransform.translation - position
+        let yaw = atan2(toCamera.x, toCamera.z)
+        let rotation = simd_quatf(angle: yaw, axis: [0, 1, 0])
+        return Transform(scale: .one, rotation: rotation, translation: position).matrix
+    }
+
     // MARK: - Per-frame update
 
     func update(deltaTime dt: Float) {
@@ -304,6 +475,27 @@ final class PipoController: ObservableObject {
         if isToon, let arView {
             toonStyle.updateThickness(cameraWorldPosition: arView.cameraTransform.translation,
                                       worldScale: pipo.scale.x)
+        }
+
+        // A geospatial anchor's position keeps refining as ARCore's tracking
+        // of that real-world point improves, so re-apply it every frame
+        // rather than just once at placement. Only the position is taken —
+        // see placeGeospatial's uprightTransform for why rotation isn't.
+        if isGeoAnchored, let anchor, let arView, let hit = geospatial.placedAnchor?.transform {
+            let hitPos = SIMD3<Float>(hit.columns.3.x, hit.columns.3.y, hit.columns.3.z) + geoOffset
+            anchor.setTransformMatrix(uprightTransform(at: hitPos, arView: arView), relativeTo: nil)
+        }
+
+        // Keep the outline shell locked to whichever clip the body is
+        // playing. Walking already re-syncs every frame via
+        // startWalkClipIfNeeded(), but the sitting loop only synced once at
+        // the moment it started — fine for a few seconds, but two separate
+        // AnimationPlaybackControllers looping the same clip drift apart
+        // over time, which read as the outline trailing the body by a
+        // couple frames the longer he sits.
+        if let outline = outlinePlayback, outline.isValid,
+           let body = sitPlayback ?? walkPlayback, body.isValid {
+            outline.time = body.time
         }
 
         switch state {

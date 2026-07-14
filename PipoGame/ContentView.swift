@@ -1,9 +1,16 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var controller = PipoController()
+    @StateObject private var controller: PipoController
+    @ObservedObject private var geospatial: GeospatialManager
     @StateObject private var recorder = ScreenRecorder()
     @State private var uiVisible = true
+
+    init() {
+        let controller = PipoController()
+        _controller = StateObject(wrappedValue: controller)
+        _geospatial = ObservedObject(wrappedValue: controller.geospatial)
+    }
 
     var body: some View {
         ZStack {
@@ -57,6 +64,23 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity)
                         }
 
+                        Button {
+                            controller.toggleGeospatial()
+                        } label: {
+                            Image(systemName: controller.isGeoActive
+                                  ? "globe.americas.fill" : "globe.americas")
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        Button {
+                            controller.toggleZAxisDragMode()
+                        } label: {
+                            Image(systemName: controller.isZAxisDragMode
+                                  ? "arrow.up.and.down.circle.fill" : "arrow.left.and.right.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(!controller.isGeoActive)
+
                         Button(role: .destructive) {
                             controller.reset()
                         } label: {
@@ -78,6 +102,33 @@ struct ContentView: View {
                 .transition(.opacity)
             }
 
+            if controller.isGeoActive {
+                VStack {
+                    Text(geospatial.statusText)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(geospatial.isHighAccuracy ? .green : .primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.top, 54)
+                    Spacer()
+                }
+                .transition(.opacity)
+            }
+
+            if controller.isGeoActive {
+                VStack {
+                    HStack {
+                        Spacer()
+                        calibrationPanel
+                            .padding(.trailing, 12)
+                    }
+                    .padding(.top, 100)
+                    Spacer()
+                }
+                .transition(.opacity)
+            }
+
             if let toast = recorder.toast {
                 VStack {
                     Text(toast)
@@ -94,10 +145,11 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.25), value: uiVisible)
         .animation(.easeInOut(duration: 0.25), value: recorder.toast)
         .onAppear {
-            controller.onLongPress = { [weak recorder] in
+            controller.onLongPress = { [weak recorder, weak geospatial] in
                 if let recorder, recorder.isRecording {
                     recorder.stop()
                 }
+                geospatial?.setDebugVisualsHidden(false)
                 // Also restores the UI if recording failed to start.
                 uiVisible = true
             }
@@ -106,15 +158,53 @@ struct ContentView: View {
 
     private func startRecording() {
         uiVisible = false
+        geospatial.setDebugVisualsHidden(true)
         // Let the UI fade out fully before capture begins so it never
         // appears in the footage.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             guard let arView = controller.arView else {
                 uiVisible = true
+                geospatial.setDebugVisualsHidden(false)
                 return
             }
             recorder.start(arView: arView)
         }
+    }
+
+    /// Manual X/Y/Z nudge for the Streetscape Geometry mesh (both the
+    /// invisible occluder and the debug tint move together) — corrects
+    /// VPS's small positioning error by hand, 0.5m per tap.
+    private var calibrationPanel: some View {
+        VStack(spacing: 6) {
+            Text("Building calibration")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            calibrationRow(axis: "X", onMinus: { geospatial.nudgeGeometryCalibration(x: -0.5) },
+                          onPlus: { geospatial.nudgeGeometryCalibration(x: 0.5) })
+            calibrationRow(axis: "Y", onMinus: { geospatial.nudgeGeometryCalibration(y: -0.5) },
+                          onPlus: { geospatial.nudgeGeometryCalibration(y: 0.5) })
+            calibrationRow(axis: "Z", onMinus: { geospatial.nudgeGeometryCalibration(z: -0.5) },
+                          onPlus: { geospatial.nudgeGeometryCalibration(z: 0.5) })
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func calibrationRow(axis: String, onMinus: @escaping () -> Void,
+                                onPlus: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Text(axis)
+                .font(.caption.monospaced())
+                .frame(width: 14)
+            Button(action: onMinus) {
+                Image(systemName: "minus.circle.fill")
+            }
+            Button(action: onPlus) {
+                Image(systemName: "plus.circle.fill")
+            }
+        }
+        .buttonStyle(.plain)
+        .font(.title3)
     }
 
     private var hint: String {

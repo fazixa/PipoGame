@@ -58,9 +58,17 @@ struct ARViewContainer: UIViewRepresentable {
         rotation.delegate = context.coordinator
         arView.addGestureRecognizer(rotation)
 
+        let pan = UIPanGestureRecognizer(target: context.coordinator,
+                                         action: #selector(Coordinator.handlePan(_:)))
+        pan.maximumNumberOfTouches = 1
+        arView.addGestureRecognizer(pan)
+
         controller.arView = arView
-        context.coordinator.updateSubscription = arView.scene.subscribe(to: SceneEvents.Update.self) { [weak controller] event in
+        context.coordinator.updateSubscription = arView.scene.subscribe(to: SceneEvents.Update.self) { [weak controller, weak arView] event in
             controller?.update(deltaTime: Float(event.deltaTime))
+            if let arView, let frame = arView.session.currentFrame {
+                controller?.geospatial.update(frame: frame, in: arView)
+            }
         }
 
         return arView
@@ -85,6 +93,14 @@ struct ARViewContainer: UIViewRepresentable {
         @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
             guard let arView = controller.arView else { return }
             let point = recognizer.location(in: arView)
+            if controller.isGeoActive {
+                // Geospatial mode: taps target real buildings meters/blocks
+                // away, which ARKit's own near-field plane raycast (below)
+                // has no way to hit — route through ARCore's Streetscape
+                // Geometry raycast instead.
+                controller.placeGeospatial(from: arView, at: point)
+                return
+            }
             guard let result = arView.raycast(from: point,
                                               allowing: .estimatedPlane,
                                               alignment: .any).first else { return }
@@ -106,6 +122,27 @@ struct ARViewContainer: UIViewRepresentable {
             guard recognizer.state == .changed else { return }
             controller.rotate(by: Float(recognizer.rotation))
             recognizer.rotation = 0
+        }
+
+        private var isDraggingPipo = false
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let arView = controller.arView, let view = recognizer.view else { return }
+            switch recognizer.state {
+            case .began:
+                isDraggingPipo = controller.beginDrag(at: recognizer.location(in: arView))
+            case .changed:
+                guard isDraggingPipo else { return }
+                controller.dragBy(recognizer.translation(in: view), at: recognizer.location(in: arView))
+                recognizer.setTranslation(.zero, in: view)
+            case .ended, .cancelled, .failed:
+                if isDraggingPipo {
+                    controller.endDrag()
+                    isDraggingPipo = false
+                }
+            default:
+                break
+            }
         }
 
         // Let two-finger pinch and rotate run together instead of one

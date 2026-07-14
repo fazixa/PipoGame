@@ -3,3 +3,4 @@ PipoGame.xcodeproj/xcuserdata/
 DerivedData/
 .DS_Store
 build/
+PipoGame/Secrets.swift

@@ -11,7 +11,7 @@ final class ToonStyle {
     /// Outline thickness in model units — a fixed fraction of Pipo's own
     /// size (he is ~5.4 units tall), so the line scales with him like part
     /// of the drawing and the art style stays put at any distance or pinch.
-    private let lineWidth: Float = 0.032
+    private let lineWidth: Float = 0.012
 
     // RealityKit merges Pipo's three meshes into ONE ModelComponent with a
     // material slot per part, so eyes/mouth cannot be excluded by removing

@@ -10,18 +10,32 @@ settings:
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ZQ3376B866
+    # ARCore ships static-library XCFrameworks with Objective-C categories;
+    # without -ObjC the linker strips them as "unused", causing the
+    # category's methods to be missing at runtime (unrecognized selector).
+    OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
+packages:
+  ARCore:
+    url: https://github.com/google-ar/arcore-ios-sdk
+    from: 1.54.0
 targets:
   PipoGame:
     type: application
     platform: iOS
     sources:
       - PipoGame
+    dependencies:
+      - package: ARCore
+        product: ARCoreGeospatial
     info:
       path: PipoGame/Info.plist
       properties:
         UILaunchScreen: {}
         NSCameraUsageDescription: Pipo needs the camera to see the world and stand in it.
         NSPhotoLibraryAddUsageDescription: Recordings of Pipo are saved to your Photos library.
+        NSLocationWhenInUseUsageDescription: Pipo needs your location to place him on real buildings around you.
+        NSLocationTemporaryUsageDescriptionDictionary:
+          PipoGeospatialPrecision: Precise location lets Pipo line up accurately with real buildings.
         UIRequiredDeviceCapabilities: [arkit]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
