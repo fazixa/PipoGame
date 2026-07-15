@@ -116,6 +116,6 @@ struct ContentView: View {
         if controller.isSitting {
             return "Pipo is sitting — tap Stand first to move him"
         }
-        return "Tap anywhere to make Pipo walk there"
+        return "Drag to move Pipo • twist to turn him"
     }
 }

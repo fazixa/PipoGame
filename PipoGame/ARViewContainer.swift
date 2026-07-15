@@ -53,6 +53,14 @@ struct ARViewContainer: UIViewRepresentable {
                                              action: #selector(Coordinator.handlePinch(_:)))
         arView.addGestureRecognizer(pinch)
 
+        let pan = UIPanGestureRecognizer(target: context.coordinator,
+                                         action: #selector(Coordinator.handlePan(_:)))
+        arView.addGestureRecognizer(pan)
+
+        let rotation = UIRotationGestureRecognizer(target: context.coordinator,
+                                                    action: #selector(Coordinator.handleRotation(_:)))
+        arView.addGestureRecognizer(rotation)
+
         controller.arView = arView
         context.coordinator.updateSubscription = arView.scene.subscribe(to: SceneEvents.Update.self) { [weak controller] event in
             controller?.update(deltaTime: Float(event.deltaTime))
@@ -93,6 +101,21 @@ struct ARViewContainer: UIViewRepresentable {
             guard recognizer.state == .changed else { return }
             controller.pinch(by: Float(recognizer.scale))
             recognizer.scale = 1
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard recognizer.state == .changed, let arView = controller.arView else { return }
+            let point = recognizer.location(in: arView)
+            guard let result = arView.raycast(from: point,
+                                              allowing: .estimatedPlane,
+                                              alignment: .any).first else { return }
+            controller.drag(to: result)
+        }
+
+        @objc func handleRotation(_ recognizer: UIRotationGestureRecognizer) {
+            guard recognizer.state == .changed else { return }
+            controller.rotate(by: Float(recognizer.rotation))
+            recognizer.rotation = 0
         }
     }
 }

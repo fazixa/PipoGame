@@ -32,6 +32,14 @@ enum PipoAsset {
         /// TEMP: keeps the ClimbTest entity that climbClip came from alive —
         /// see landEntity's doc comment for why this matters.
         let climbEntity: Entity?
+        /// TEMP: sit clip. Same loading pattern as landClip/climbClip. Its
+        /// export shifted the whole rig so the seated butt height — not the
+        /// standard Mixamo feet-at-origin convention — is the local origin,
+        /// so placing this entity puts his butt on the tapped surface.
+        let sitClip: AnimationResource?
+        /// TEMP: keeps the SittingTest entity that sitClip came from alive —
+        /// see landEntity's doc comment for why this matters.
+        let sitEntity: Entity?
     }
 
     static func load() -> LoadedPipo? {
@@ -67,9 +75,13 @@ enum PipoAsset {
         let climbEntity = try? Entity.load(named: "ClimbTest")
         let climbClip = climbEntity.flatMap(firstEntityWithAnimations)?.availableAnimations.first
 
+        let sitEntity = try? Entity.load(named: "SittingTest")
+        let sitClip = sitEntity.flatMap(firstEntityWithAnimations)?.availableAnimations.first
+
         return LoadedPipo(root: root, animationOwner: owner, walkClip: clip,
                           landClip: landClip, landEntity: landEntity,
-                          climbClip: climbClip, climbEntity: climbEntity)
+                          climbClip: climbClip, climbEntity: climbEntity,
+                          sitClip: sitClip, sitEntity: sitEntity)
     }
 
     private static func firstEntityWithAnimations(in entity: Entity) -> Entity? {
