@@ -256,8 +256,13 @@ final class PipoController: ObservableObject {
                 edgeConfirmFrames += 1
                 if edgeConfirmFrames >= edgeConfirmThreshold {
                     edgeConfirmFrames = 0
-                    walkPlayback?.pause()
-                    startLandClip(paused: true)
+                    // Fully stop (not pause) the walk clip — a paused-but-
+                    // present controller can still compete with the land
+                    // clip on the same entity, since RealityKit layers
+                    // animations by default rather than replacing them.
+                    walkPlayback?.stop()
+                    walkPlayback = nil
+                    startLandClip()
                     state = .falling(resumeTarget: target, groundY: aheadGroundY)
                     return
                 }
@@ -320,7 +325,15 @@ final class PipoController: ObservableObject {
             position.y = groundY
             pipo.setPosition(position, relativeTo: nil)
             fallVelocity = 0
-            startLandClip(paused: false)
+            // Resume the SAME controller created back in walk() rather than
+            // tearing it down and starting a new one — recreating the
+            // controller mid-sequence (stop + fresh playAnimation) was the
+            // likely source of the landing clip playing "randomly": whether
+            // the new controller was fully hooked up before the very next
+            // frame's isValid/time check was timing-dependent.
+            landPlayback?.speed = 1
+            landPlayback?.resume()
+            print("DEBUG landing resume: playback=\(landPlayback != nil) valid=\(landPlayback?.isValid ?? false) time=\(landPlayback?.time ?? -1)")
             state = .landing(resumeTarget: resumeTarget)
             return
         }
@@ -328,10 +341,9 @@ final class PipoController: ObservableObject {
     }
 
     private func updateLanding(pipo: Entity, resumeTarget: SIMD3<Float>) {
-        print("DEBUG updateLanding: playback=\(landPlayback != nil) valid=\(landPlayback?.isValid ?? false) time=\(landPlayback?.time ?? -1) duration=\(landClipDuration)")
         guard let playback = landPlayback, playback.isValid,
               playback.time < landClipDuration - 0.05 else {
-            print("DEBUG updateLanding: bailing to walk")
+            print("DEBUG updateLanding: bailing to walk, playback=\(landPlayback != nil) valid=\(landPlayback?.isValid ?? false) time=\(landPlayback?.time ?? -1)")
             landPlayback?.stop()
             landPlayback = nil
             state = .walking(target: resumeTarget)
@@ -340,18 +352,17 @@ final class PipoController: ObservableObject {
         }
     }
 
-    /// `paused: true` holds the clip's first frame (the braced-in-air pose)
-    /// as a static visual during the fall itself; `paused: false` actually
-    /// plays it through on impact.
-    private func startLandClip(paused: Bool) {
+    /// Creates the land-clip controller paused at frame 0 (the braced-in-air
+    /// pose), held as a static visual during the fall itself. fall() resumes
+    /// this SAME controller on impact rather than recreating it.
+    private func startLandClip() {
         guard let clip = landClip, let owner = animationOwner else {
             print("DEBUG startLandClip: missing clip or owner, clip=\(landClip != nil) owner=\(animationOwner != nil)")
             return
         }
         landPlayback?.stop()
-        landPlayback = owner.playAnimation(clip, transitionDuration: paused ? 0 : 0.1,
-                                           startsPaused: paused)
-        print("DEBUG startLandClip(paused: \(paused)): created playback, valid=\(landPlayback?.isValid ?? false) time=\(landPlayback?.time ?? -1)")
+        landPlayback = owner.playAnimation(clip, transitionDuration: 0, startsPaused: true)
+        print("DEBUG startLandClip: created paused playback, valid=\(landPlayback?.isValid ?? false)")
     }
 
     // MARK: - Rigged clip playback
