@@ -14,11 +14,26 @@ enum PipoAsset {
         /// The entity that owns the animation clips (usually a child SkelRoot).
         let animationOwner: Entity
         let walkClip: AnimationResource
+        /// TEMP: hard-landing clip, played on impact after a fall. Loaded
+        /// from a separate USDZ (LandTest.usdz) sharing the same Mixamo
+        /// joint names/hierarchy as WalkTest, so its AnimationResource can
+        /// be played directly on the walk entity's skeleton.
+        let landClip: AnimationResource?
+        /// TEMP: keeps the LandTest entity that landClip came from alive.
+        /// Never added to the scene — extracting the clip and letting this
+        /// go out of scope was unreliable on a second load (worked once,
+        /// then landClip silently came back functional-but-dead after a
+        /// reset+reload). Held here so it stays retained for as long as
+        /// the character using its clip does.
+        let landEntity: Entity?
     }
 
     static func load() -> LoadedPipo? {
-        guard let root = try? Entity.load(named: "Pipo") else { return nil }
-        root.scale = SIMD3<Float>(repeating: worldScale)
+        // TEMP: loading WalkTest.usdz (Mixamo rig prototype) instead of Pipo
+        // to sanity-check the joint-skeleton export pipeline on this clean,
+        // pre-regression branch. Revert to "Pipo" / worldScale afterward.
+        guard let root = try? Entity.load(named: "WalkTest") else { return nil }
+        root.scale = SIMD3<Float>(repeating: 0.015)
 
         applyGroundingShadow(root)
 
@@ -26,7 +41,23 @@ enum PipoAsset {
               let clip = owner.availableAnimations.first else {
             return nil
         }
-        return LoadedPipo(root: root, animationOwner: owner, walkClip: clip)
+
+        // TEMP: LandTest.usdz is loaded to pull its AnimationResource out —
+        // its own entity hierarchy is never added to the scene, but IS kept
+        // alive via LoadedPipo.landEntity (see its doc comment for why).
+        // Same skeleton/joint names as WalkTest, so the clip plays fine on
+        // the walk entity directly.
+        let landEntity = try? Entity.load(named: "LandTest")
+        print("DEBUG landEntity loaded:", landEntity != nil)
+        let landOwner = landEntity.flatMap(firstEntityWithAnimations)
+        print("DEBUG landOwner found:", landOwner != nil,
+              "availableAnimations:", landOwner?.availableAnimations.count ?? -1)
+        let landClip = landOwner?.availableAnimations.first
+        print("DEBUG landClip extracted:", landClip != nil,
+              "duration:", landClip?.definition.duration ?? -1)
+
+        return LoadedPipo(root: root, animationOwner: owner, walkClip: clip,
+                          landClip: landClip, landEntity: landEntity)
     }
 
     private static func firstEntityWithAnimations(in entity: Entity) -> Entity? {

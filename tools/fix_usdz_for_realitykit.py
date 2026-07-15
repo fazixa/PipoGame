@@ -119,7 +119,7 @@ def main(src, dst):
 
     # --- map USD joint tokens (sanitized leaves) back to Blender bone names
     old_joints = list(skel_api.GetJointsAttr().Get())
-    sanitized = {name.replace(".", "_"): name for name in bones}
+    sanitized = {name.replace(".", "_").replace(":", "_"): name for name in bones}
     if len(sanitized) != len(bones):
         sys.exit("bone name collision after sanitizing '.' -> '_'")
     try:
@@ -141,7 +141,7 @@ def main(src, dst):
     def path_for(name):
         i = index[name]
         if newpaths[i] is None:
-            leaf = name.replace(".", "_")
+            leaf = name.replace(".", "_").replace(":", "_")
             parent = deform_parent(name)
             newpaths[i] = leaf if parent is None else path_for(parent) + "/" + leaf
         return newpaths[i]

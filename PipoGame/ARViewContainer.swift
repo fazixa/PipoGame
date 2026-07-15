@@ -22,6 +22,16 @@ struct ARViewContainer: UIViewRepresentable {
 
         arView.environment.sceneUnderstanding.options.insert(.occlusion)
         arView.environment.sceneUnderstanding.options.insert(.receivesLighting)
+        // Lets groundHeight() raycast against the actual reconstructed LiDAR
+        // mesh instead of ARKit's simplified/extrapolated estimated-plane
+        // model, which was bleeding past real edges (e.g. a table boundary).
+        arView.environment.sceneUnderstanding.options.insert(.collision)
+
+        // DEBUG: visualize the LiDAR scene reconstruction mesh (wireframe
+        // over real-world geometry) so surfaces/heights ARKit actually
+        // detected are visible. Remove once done checking table/floor
+        // detection for the walk-off-edge falling behavior.
+        arView.debugOptions.insert(.showSceneUnderstanding)
 
         let coaching = ARCoachingOverlayView()
         coaching.session = arView.session

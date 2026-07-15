@@ -20,6 +20,12 @@ final class PipoController: ObservableObject {
         /// Rigged path only: finish the current step, then freeze the clip.
         case stoppingWalk
         case sitting
+        /// TEMP: fall/landing prototype. Dropping past a look-ahead-detected
+        /// edge; groundY is where it'll land, resumeTarget is the original
+        /// walk destination to continue toward once landed.
+        case falling(resumeTarget: SIMD3<Float>, groundY: Float)
+        /// TEMP: hard-landing clip playing on impact, then resumes walking.
+        case landing(resumeTarget: SIMD3<Float>)
     }
 
     @Published var isPlaced = false
@@ -43,6 +49,35 @@ final class PipoController: ObservableObject {
     private var walkPlayback: AnimationPlaybackController?
     private var usesClips: Bool { walkClip != nil }
 
+    // TEMP: fall/landing prototype
+    private var landClip: AnimationResource?
+    private var landClipDuration: TimeInterval = 1
+    private var landPlayback: AnimationPlaybackController?
+    /// Keeps landClip's source entity retained — see LoadedPipo.landEntity.
+    private var landEntity: Entity?
+    private var fallVelocity: Float = 0
+    private let gravity: Float = 9.8                          // m/s^2, real-world scale
+    // TEMP: fixed real-world distance, deliberately NOT scaled by
+    // scaleFactor. This is "how far ahead to peek for an edge," which
+    // should track how far a step actually covers, not the character's
+    // rendered size — scaling it by pinch level meant that at the ~9x
+    // scaleFactor implied by testing at 20cm+ tall, it was looking ~45cm
+    // ahead and detecting the table's edge while still comfortably mid-table.
+    private let lookAheadDistance: Float = 0.03                 // m, fixed
+    /// Trigger a fall when the look-ahead ground drop exceeds this many
+    /// character-heights, so small steps/bumps don't trigger it. This DOES
+    /// scale correctly with size, via characterHeight below.
+    private let fallEdgeHeightMultiplier: Float = 1.0
+    private var characterHeight: Float {
+        guard let pipo else { return 0.02 }
+        return pipo.visualBounds(relativeTo: nil).extents.y
+    }
+    // Minor safety net against a single noisy LiDAR-mesh raycast (not the
+    // main fix — the look-ahead distance above was) — require the drop to
+    // read consistently for a few frames before committing.
+    private var edgeConfirmFrames = 0
+    private let edgeConfirmThreshold = 6  // ~0.1s at 60fps
+
     private var time: Float = 0
     private var walkPhase: Float = 0
     private var baseScale: Float = 1
@@ -53,7 +88,16 @@ final class PipoController: ObservableObject {
         guard let pipo, baseScale > 0 else { return 1 }
         return pipo.scale.x / baseScale
     }
-    private var walkSpeed: Float { (usesClips ? 0.16 : 0.22) * scaleFactor }  // m/s
+    // TEMP: replaces the Pipo-tuned 0.16 for WalkTest.usdz (Mixamo,
+    // exported "in place" with no baked root motion). The clip's own
+    // stance-phase kinematics (both feet's ground-contact windows, cross-
+    // checked two ways) imply ~1.15 m/s at the model's NATURAL/raw size —
+    // but PipoAsset.load() renders WalkTest at 0.015x scale, and walkSpeed
+    // is applied at that already-scaled size (scaleFactor normalizes to 1.0
+    // at placement scale, not true 1:1), so the constant needs that same
+    // 0.015 factor folded in: 1.15 * 0.015 ≈ 0.0173.
+    // Revert to 0.16 when swapping back to Pipo.
+    private var walkSpeed: Float { (usesClips ? 0.0173 : 0.22) * scaleFactor }  // m/s
     private let stepRate: Float = 11                          // procedural gait, rad/s
     private var arrivalDistance: Float { 0.03 * scaleFactor }
 
@@ -65,6 +109,8 @@ final class PipoController: ObservableObject {
             place(at: result.worldTransform)
         case .sitting:
             break // hint tells the user to stand first
+        case .falling, .landing:
+            break // TEMP: fall/landing prototype — ignore taps mid-sequence
         case .idle, .walking, .stoppingWalk:
             let t = result.worldTransform.columns.3
             state = .walking(target: [t.x, t.y, t.z])
@@ -81,8 +127,8 @@ final class PipoController: ObservableObject {
         case .idle, .walking, .stoppingWalk:
             state = .sitting
             isSitting = true
-        case .unplaced:
-            break
+        case .unplaced, .falling, .landing:
+            break // TEMP: can't sit mid-air or mid-landing
         }
     }
 
@@ -100,6 +146,11 @@ final class PipoController: ObservableObject {
         animationOwner = nil
         walkClip = nil
         walkPlayback = nil
+        landClip = nil
+        landPlayback = nil
+        landEntity = nil
+        fallVelocity = 0
+        edgeConfirmFrames = 0
         state = .unplaced
         isPlaced = false
         isSitting = false
@@ -115,6 +166,9 @@ final class PipoController: ObservableObject {
             animationOwner = loaded.animationOwner
             walkClip = loaded.walkClip
             walkClipDuration = loaded.walkClip.definition.duration
+            landClip = loaded.landClip
+            landClipDuration = loaded.landClip?.definition.duration ?? 1
+            landEntity = loaded.landEntity
             supportsSit = false
         } else {
             pipo = PipoBuilder.build()
@@ -167,6 +221,12 @@ final class PipoController: ObservableObject {
 
         case .sitting:
             if !usesClips { animateSit(pipo: pipo, dt: dt) }
+
+        case .falling(let resumeTarget, let groundY):
+            fall(pipo: pipo, resumeTarget: resumeTarget, groundY: groundY, dt: dt)
+
+        case .landing(let resumeTarget):
+            updateLanding(pipo: pipo, resumeTarget: resumeTarget)
         }
     }
 
@@ -182,6 +242,30 @@ final class PipoController: ObservableObject {
         }
 
         let direction = heading / distance
+
+        // TEMP: fall/landing prototype. Look ahead of the current position
+        // rather than reacting after already stepping into open air — if
+        // the ground there drops more than ~1 character-height, fall.
+        // lookAheadDistance is a fixed distance (not scaled by pinch size);
+        // the confirm-frames counter is a minor safety net against a single
+        // noisy LiDAR-mesh raycast.
+        if usesClips, landClip != nil {
+            let lookAheadPoint = position + direction * lookAheadDistance
+            if let aheadGroundY = groundHeight(at: lookAheadPoint),
+               position.y - aheadGroundY > characterHeight * fallEdgeHeightMultiplier {
+                edgeConfirmFrames += 1
+                if edgeConfirmFrames >= edgeConfirmThreshold {
+                    edgeConfirmFrames = 0
+                    walkPlayback?.pause()
+                    startLandClip(paused: true)
+                    state = .falling(resumeTarget: target, groundY: aheadGroundY)
+                    return
+                }
+            } else {
+                edgeConfirmFrames = 0
+            }
+        }
+
         let step = min(walkSpeed * dt, distance)
         position += direction * step
 
@@ -206,11 +290,68 @@ final class PipoController: ObservableObject {
 
     private func groundHeight(at position: SIMD3<Float>) -> Float? {
         guard let arView else { return nil }
+
+        // Prefer raycasting against the actual reconstructed LiDAR mesh
+        // (real triangle geometry) over ARKit's estimated-plane model, which
+        // extrapolates/smooths past real edges like a table boundary and
+        // was causing Pipo to "float" past them.
+        let from = position + SIMD3<Float>(0, 0.25, 0)
+        let to = position - SIMD3<Float>(0, 2.0, 0)
+        if let hit = arView.scene.raycast(from: from, to: to, query: .nearest,
+                                          mask: .sceneUnderstanding).first {
+            return hit.position.y
+        }
+
+        // Fallback: estimated plane, for areas the mesh hasn't scanned yet.
         let query = ARRaycastQuery(origin: position + [0, 0.25, 0],
                                    direction: [0, -1, 0],
                                    allowing: .estimatedPlane,
                                    alignment: .any)
         return arView.session.raycast(query).first?.worldTransform.columns.3.y
+    }
+
+    // MARK: - Fall/landing prototype
+
+    private func fall(pipo: Entity, resumeTarget: SIMD3<Float>, groundY: Float, dt: Float) {
+        fallVelocity += gravity * dt
+        var position = pipo.position(relativeTo: nil)
+        position.y -= fallVelocity * dt
+        if position.y <= groundY {
+            position.y = groundY
+            pipo.setPosition(position, relativeTo: nil)
+            fallVelocity = 0
+            startLandClip(paused: false)
+            state = .landing(resumeTarget: resumeTarget)
+            return
+        }
+        pipo.setPosition(position, relativeTo: nil)
+    }
+
+    private func updateLanding(pipo: Entity, resumeTarget: SIMD3<Float>) {
+        print("DEBUG updateLanding: playback=\(landPlayback != nil) valid=\(landPlayback?.isValid ?? false) time=\(landPlayback?.time ?? -1) duration=\(landClipDuration)")
+        guard let playback = landPlayback, playback.isValid,
+              playback.time < landClipDuration - 0.05 else {
+            print("DEBUG updateLanding: bailing to walk")
+            landPlayback?.stop()
+            landPlayback = nil
+            state = .walking(target: resumeTarget)
+            startWalkClipIfNeeded()
+            return
+        }
+    }
+
+    /// `paused: true` holds the clip's first frame (the braced-in-air pose)
+    /// as a static visual during the fall itself; `paused: false` actually
+    /// plays it through on impact.
+    private func startLandClip(paused: Bool) {
+        guard let clip = landClip, let owner = animationOwner else {
+            print("DEBUG startLandClip: missing clip or owner, clip=\(landClip != nil) owner=\(animationOwner != nil)")
+            return
+        }
+        landPlayback?.stop()
+        landPlayback = owner.playAnimation(clip, transitionDuration: paused ? 0 : 0.1,
+                                           startsPaused: paused)
+        print("DEBUG startLandClip(paused: \(paused)): created playback, valid=\(landPlayback?.isValid ?? false) time=\(landPlayback?.time ?? -1)")
     }
 
     // MARK: - Rigged clip playback
@@ -219,6 +360,7 @@ final class PipoController: ObservableObject {
         guard let clip = walkClip, let owner = animationOwner else { return }
         if let playback = walkPlayback, playback.isValid {
             playback.speed = 1
+            playback.resume()  // TEMP: un-pauses if this resumed from a fall
         } else {
             walkPlayback = owner.playAnimation(clip.repeat(),
                                                transitionDuration: 0.25,
