@@ -21,9 +21,11 @@ final class PipoController: ObservableObject {
         case stoppingWalk
         case sitting
         /// TEMP: fall/landing prototype. Dropping past a look-ahead-detected
-        /// edge; groundY is where it'll land, resumeTarget is the original
-        /// walk destination to continue toward once landed.
-        case falling(resumeTarget: SIMD3<Float>, groundY: Float)
+        /// edge; landingPosition is where it'll land (offset forward from
+        /// the edge, in the direction Pipo was walking, so he doesn't drop
+        /// straight down off the lip), resumeTarget is the original walk
+        /// destination to continue toward once landed.
+        case falling(resumeTarget: SIMD3<Float>, landingPosition: SIMD3<Float>)
         /// TEMP: hard-landing clip playing on impact, then resumes walking.
         case landing(resumeTarget: SIMD3<Float>)
     }
@@ -114,7 +116,6 @@ final class PipoController: ObservableObject {
     // Revert to 0.16 when swapping back to Pipo.
     private var walkSpeed: Float { (usesClips ? 0.0173 : 0.22) * scaleFactor }  // m/s
     private let stepRate: Float = 11                          // procedural gait, rad/s
-    private var arrivalDistance: Float { 0.03 * scaleFactor }
 
     // MARK: - Input
 
@@ -166,8 +167,13 @@ final class PipoController: ObservableObject {
         let t = transform.columns.3
         drawnPoints.append([t.x, t.y, t.z])
 
-        let marker = ModelEntity(mesh: .generateSphere(radius: 0.01 * scaleFactor),
-                                 materials: [UnlitMaterial(color: .systemYellow)])
+        // Surface orientation read from the raycast result's own up-axis
+        // (column 1) — a tap that landed on a wall reads as vertical (red),
+        // ground/ledge taps as horizontal (yellow).
+        let upY = transform.columns.1.y
+        let isVertical = abs(upY) < 0.5
+        let marker = ModelEntity(mesh: .generateSphere(radius: 0.004 * scaleFactor),
+                                 materials: [UnlitMaterial(color: isVertical ? .systemRed : .systemYellow)])
         let markerAnchor = AnchorEntity(world: transform)
         markerAnchor.addChild(marker)
         arView.scene.addAnchor(markerAnchor)
@@ -289,8 +295,8 @@ final class PipoController: ObservableObject {
         case .sitting:
             if !usesClips { animateSit(pipo: pipo, dt: dt) }
 
-        case .falling(let resumeTarget, let groundY):
-            fall(pipo: pipo, resumeTarget: resumeTarget, groundY: groundY, dt: dt)
+        case .falling(let resumeTarget, let landingPosition):
+            fall(pipo: pipo, resumeTarget: resumeTarget, landingPosition: landingPosition, dt: dt)
 
         case .landing(let resumeTarget):
             updateLanding(pipo: pipo, resumeTarget: resumeTarget)
@@ -303,7 +309,11 @@ final class PipoController: ObservableObject {
         heading.y = 0
         let distance = simd_length(heading)
 
-        if distance < arrivalDistance {
+        // Arrival is detected once the normal walked step below has closed
+        // the gap to essentially nothing — it clamps to never overshoot, so
+        // Pipo naturally walks all the way to the point's exact center
+        // instead of stopping early or being snapped the rest of the way.
+        if distance < 0.0005 {
             // TEMP: trajectory-drawing prototype — remove the marker for the
             // waypoint just reached, then continue toward the next queued
             // point if this was part of a multi-point drawn path.
@@ -341,7 +351,16 @@ final class PipoController: ObservableObject {
                     walkPlayback?.stop()
                     walkPlayback = nil
                     startLandClip()
-                    state = .falling(resumeTarget: target, groundY: aheadGroundY)
+                    // Land a bit forward of the edge, in the direction Pipo
+                    // was walking, rather than dropping straight down from
+                    // where the edge was detected — half a character-height
+                    // of forward carry reads as falling with momentum
+                    // instead of stepping straight off a cliff.
+                    let forwardCarry = direction * (characterHeight * 0.5)
+                    let landingPosition = SIMD3<Float>(position.x + forwardCarry.x,
+                                                        aheadGroundY,
+                                                        position.z + forwardCarry.z)
+                    state = .falling(resumeTarget: target, landingPosition: landingPosition)
                     return
                 }
             } else {
@@ -395,12 +414,19 @@ final class PipoController: ObservableObject {
 
     // MARK: - Fall/landing prototype
 
-    private func fall(pipo: Entity, resumeTarget: SIMD3<Float>, groundY: Float, dt: Float) {
+    private func fall(pipo: Entity, resumeTarget: SIMD3<Float>, landingPosition: SIMD3<Float>, dt: Float) {
         fallVelocity += gravity * dt
         var position = pipo.position(relativeTo: nil)
         position.y -= fallVelocity * dt
-        if position.y <= groundY {
-            position.y = groundY
+        // Drift horizontally toward the forward-offset landing spot while
+        // falling, carrying the walking momentum through the drop instead
+        // of dropping straight down from the edge.
+        position.x = damp(position.x, landingPosition.x, rate: 6, dt: dt)
+        position.z = damp(position.z, landingPosition.z, rate: 6, dt: dt)
+        if position.y <= landingPosition.y {
+            position.y = landingPosition.y
+            position.x = landingPosition.x
+            position.z = landingPosition.z
             pipo.setPosition(position, relativeTo: nil)
             fallVelocity = 0
             // Resume the SAME controller created back in walk() rather than
