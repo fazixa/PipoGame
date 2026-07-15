@@ -78,6 +78,10 @@ struct ARViewContainer: UIViewRepresentable {
     final class Coordinator {
         let controller: PipoController
         var updateSubscription: Cancellable?
+        /// TEMP: freehand-move prototype — set at pan-began if the touch
+        /// grabbed a gizmo arrow, so .changed routes to the axis-constrained
+        /// drag instead of the normal surface-snapping one.
+        var isDraggingGizmo = false
 
         init(controller: PipoController) {
             self.controller = controller
@@ -104,12 +108,29 @@ struct ARViewContainer: UIViewRepresentable {
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            guard recognizer.state == .changed, let arView = controller.arView else { return }
-            let point = recognizer.location(in: arView)
-            guard let result = arView.raycast(from: point,
-                                              allowing: .estimatedPlane,
-                                              alignment: .any).first else { return }
-            controller.drag(to: result)
+            guard let arView = controller.arView else { return }
+            switch recognizer.state {
+            case .began:
+                let point = recognizer.location(in: arView)
+                isDraggingGizmo = controller.beginFreehandDrag(at: point)
+            case .changed:
+                if isDraggingGizmo {
+                    controller.updateFreehandDrag(translation: recognizer.translation(in: arView))
+                } else if !controller.isFreehand {
+                    let point = recognizer.location(in: arView)
+                    guard let result = arView.raycast(from: point,
+                                                      allowing: .estimatedPlane,
+                                                      alignment: .any).first else { return }
+                    controller.drag(to: result)
+                }
+            case .ended, .cancelled, .failed:
+                if isDraggingGizmo {
+                    controller.endFreehandDrag()
+                    isDraggingGizmo = false
+                }
+            default:
+                break
+            }
         }
 
         @objc func handleRotation(_ recognizer: UIRotationGestureRecognizer) {

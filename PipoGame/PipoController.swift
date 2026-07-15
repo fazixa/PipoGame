@@ -2,6 +2,7 @@ import RealityKit
 import ARKit
 import Combine
 import simd
+import UIKit
 
 /// Owns Pipo's state machine and drives him every frame.
 ///
@@ -53,6 +54,11 @@ final class PipoController: ObservableObject {
     /// TEMP: trajectory-drawing prototype. While true, taps add path points
     /// (visualized with markers) instead of moving Pipo immediately.
     @Published var isDrawingPath = false
+    /// TEMP: freehand-move prototype. While true, a 3-axis gizmo (a child
+    /// of Pipo, so it inherits his position/rotation/scale automatically)
+    /// is shown, and dragging one of its arms moves him along that axis,
+    /// independent of any detected surface.
+    @Published var isFreehand = false
 
     /// Set by ContentView; used to stop recording without on-screen UI.
     var onLongPress: (() -> Void)?
@@ -62,6 +68,16 @@ final class PipoController: ObservableObject {
     private var state: State = .unplaced
     private var anchor: AnchorEntity?
     private var pipo: Entity?
+
+    // TEMP: freehand-move prototype. gizmoRoot is a child of pipo (see
+    // createGizmo) so it automatically inherits his position, rotation,
+    // and scale — no manual per-frame syncing needed.
+    private var gizmoRoot: Entity?
+    private var gizmoArms: [ModelEntity] = []
+    private var freehandDragAxis: SIMD3<Float>?
+    private var freehandDragStartPosition: SIMD3<Float> = .zero
+    private var freehandDragScreenDirection: CGVector = .zero
+    private var freehandDragMetersPerPoint: Float = 0
 
     // TEMP: trajectory-drawing prototype
     /// Points placed so far this drawing session, in tap order.
@@ -170,7 +186,7 @@ final class PipoController: ObservableObject {
     /// mid-climb would fight the position that state's own update logic is
     /// actively driving.
     func drag(to result: ARRaycastResult) {
-        guard let pipo, !isDrawingPath else { return }
+        guard let pipo, !isDrawingPath, !isFreehand else { return }
         switch state {
         case .idle, .sitting:
             let t = result.worldTransform.columns.3
@@ -193,13 +209,140 @@ final class PipoController: ObservableObject {
         }
     }
 
+    // MARK: - TEMP: freehand-move prototype
+
+    /// Enters/exits freehand mode (only from .idle/.sitting, same
+    /// restriction as drag/rotate). Shows/hides the 3-axis gizmo.
+    func toggleFreehand() {
+        guard isPlaced, !isDrawingPath else { return }
+        if isFreehand {
+            isFreehand = false
+            removeGizmo()
+        } else {
+            switch state {
+            case .idle, .sitting:
+                isFreehand = true
+                createGizmo()
+            case .unplaced, .walking, .stoppingWalk, .falling, .landing, .climbing:
+                break
+            }
+        }
+    }
+
+    /// Gizmo arms are children of pipo, so their length/radius are computed
+    /// in HIS OWN local (unscaled-by-his-current-transform) space — that
+    /// way, since children inherit their parent's scale automatically,
+    /// the gizmo stays correctly proportioned as he's pinched from 0.2x up
+    /// to 500x without any manual scale-factor math here.
+    private func createGizmo() {
+        guard let pipo else { return }
+        let localHeight = pipo.visualBounds(relativeTo: pipo).extents.y
+        let root = Entity()
+        // Lift up from his origin (feet) to roughly waist height, so the
+        // gizmo doesn't sit buried at ground level / overlapping his legs.
+        root.position = [0, localHeight * 0.5, 0]
+
+        let axes: [(SIMD3<Float>, UIColor, String)] = [
+            ([1, 0, 0], .systemRed, "gizmoX"),
+            ([0, 1, 0], .systemGreen, "gizmoY"),
+            ([0, 0, 1], .systemBlue, "gizmoZ"),
+        ]
+        let length: Float = localHeight * 0.5
+        let radius: Float = localHeight * 0.004
+        // Touch target is a separate, much fatter invisible capsule over
+        // the same length — grabbing a visually thin arm was unreliable
+        // since the auto-generated collision shape hugged its tiny radius
+        // exactly. This doesn't change how thin the arm looks, only how
+        // generous the hit area around it is.
+        let touchRadius: Float = localHeight * 0.04
+        var arms: [ModelEntity] = []
+        for (direction, color, name) in axes {
+            let arm = ModelEntity(mesh: .generateCylinder(height: length, radius: radius),
+                                  materials: [UnlitMaterial(color: color)])
+            arm.name = name
+            // generateCylinder is aligned along +Y by default; rotate to
+            // point along this axis, then offset so it extends OUTWARD
+            // from the origin rather than being centered on it.
+            arm.orientation = simd_quaternion([0, 1, 0], direction)
+            arm.position = direction * (length / 2)
+            arm.collision = CollisionComponent(shapes: [.generateCapsule(height: length, radius: touchRadius)])
+            root.addChild(arm)
+            arms.append(arm)
+        }
+        pipo.addChild(root)
+        gizmoRoot = root
+        gizmoArms = arms
+    }
+
+    private func removeGizmo() {
+        gizmoRoot?.removeFromParent()
+        gizmoRoot = nil
+        gizmoArms = []
+        freehandDragAxis = nil
+    }
+
+    /// Called on pan-gesture-began at the touch point; returns true if a
+    /// gizmo arrow was grabbed (in which case the caller should route
+    /// subsequent pan updates to updateFreehandDrag instead of the normal
+    /// surface-snapping drag()).
+    func beginFreehandDrag(at point: CGPoint) -> Bool {
+        guard isFreehand, let arView, let pipo,
+              let hitEntity = arView.entity(at: point) else { return false }
+        let localAxis: SIMD3<Float>
+        switch hitEntity.name {
+        case "gizmoX": localAxis = [1, 0, 0]
+        case "gizmoY": localAxis = [0, 1, 0]
+        case "gizmoZ": localAxis = [0, 0, 1]
+        default: return false
+        }
+        // The gizmo is a child of pipo, so its arms rotate along with him —
+        // resolve the grabbed arm's CURRENT world direction through his
+        // orientation, not a fixed world axis, so dragging a tilted arm
+        // moves him along where it's actually pointing.
+        let axis = pipo.orientation(relativeTo: nil).act(localAxis)
+        let worldPosition = pipo.position(relativeTo: nil)
+        // Project the axis into screen space (a short probe point along it)
+        // so a 2D finger drag can be resolved into a 1D distance along that
+        // axis, regardless of camera angle — the same technique real 3D
+        // move gizmos use, rather than assuming the axis is screen-aligned.
+        guard let originScreen = arView.project(worldPosition) else { return false }
+        let probeDistance: Float = 0.05
+        guard let probeScreen = arView.project(worldPosition + axis * probeDistance) else { return false }
+        let dx = Float(probeScreen.x - originScreen.x)
+        let dy = Float(probeScreen.y - originScreen.y)
+        let screenDistance = sqrt(dx * dx + dy * dy)
+        guard screenDistance > 1 else { return false } // axis pointing at/away from camera
+        freehandDragAxis = axis
+        freehandDragStartPosition = worldPosition
+        freehandDragScreenDirection = CGVector(dx: CGFloat(dx / screenDistance), dy: CGFloat(dy / screenDistance))
+        freehandDragMetersPerPoint = probeDistance / screenDistance
+        return true
+    }
+
+    /// `translation` is the pan gesture's cumulative translation since it
+    /// began (UIPanGestureRecognizer.translation(in:)), in points.
+    func updateFreehandDrag(translation: CGPoint) {
+        guard let axis = freehandDragAxis, let pipo else { return }
+        let projected = Float(translation.x) * Float(freehandDragScreenDirection.dx)
+                       + Float(translation.y) * Float(freehandDragScreenDirection.dy)
+        let worldDelta = projected * freehandDragMetersPerPoint
+        let newPosition = freehandDragStartPosition + axis * worldDelta
+        // gizmoRoot is a child of pipo, so it moves (and rotates, and
+        // scales) with him automatically — nothing else to sync here.
+        pipo.setPosition(newPosition, relativeTo: nil)
+    }
+
+    func endFreehandDrag() {
+        freehandDragAxis = nil
+    }
+
     // MARK: - TEMP: trajectory-drawing prototype
 
     /// Enters drawing mode (only from .idle, with Pipo already placed) or,
     /// if already drawing, commits the drawn points as a multi-waypoint
     /// walk and starts moving through them in order.
     func toggleDrawPath() {
-        guard isPlaced else { return }
+        guard isPlaced, !isFreehand else { return }
         if isDrawingPath {
             isDrawingPath = false
             guard !drawnPoints.isEmpty else { return }
@@ -244,7 +387,7 @@ final class PipoController: ObservableObject {
     }
 
     func toggleSit() {
-        guard supportsSit, !isDrawingPath else { return }
+        guard supportsSit, !isDrawingPath, !isFreehand else { return }
         switch state {
         case .sitting:
             // Force a fresh walk-clip crossfade out of the sit pose rather
@@ -292,6 +435,11 @@ final class PipoController: ObservableObject {
         sitClip = nil
         sitPlayback = nil
         sitEntity = nil
+        // gizmoRoot is a child of pipo, so it's already gone once pipo is
+        // released above — just reset the tracking state here.
+        gizmoRoot = nil
+        gizmoArms = []
+        isFreehand = false
         clearPathMarkers()
         drawnPoints = []
         pathQueue = []

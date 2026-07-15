@@ -28,7 +28,7 @@ struct ContentView: View {
                             Image(systemName: controller.isSitting ? "figure.stand" : "chair")
                                 .frame(maxWidth: .infinity)
                         }
-                        .disabled(!controller.isPlaced || !controller.supportsSit || controller.isDrawingPath)
+                        .disabled(!controller.isPlaced || !controller.supportsSit || controller.isDrawingPath || controller.isFreehand)
 
                         // TEMP: trajectory-drawing prototype
                         Button {
@@ -37,7 +37,16 @@ struct ContentView: View {
                             Image(systemName: controller.isDrawingPath ? "checkmark.circle.fill" : "scribble")
                                 .frame(maxWidth: .infinity)
                         }
-                        .disabled(!controller.isPlaced || controller.isSitting)
+                        .disabled(!controller.isPlaced || controller.isSitting || controller.isFreehand)
+
+                        // TEMP: freehand-move prototype
+                        Button {
+                            controller.toggleFreehand()
+                        } label: {
+                            Image(systemName: controller.isFreehand ? "checkmark.circle.fill" : "move.3d")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(!controller.isPlaced || controller.isDrawingPath)
 
                         Button {
                             startRecording()
@@ -109,6 +118,9 @@ struct ContentView: View {
         }
         if controller.isDrawingPath {
             return "Tap to add path points • tap Go when done"
+        }
+        if controller.isFreehand {
+            return "Drag the colored arrows to move Pipo in 3D • tap Done"
         }
         if controller.isSitting {
             return "Pipo is sitting — tap Stand first to move him"
