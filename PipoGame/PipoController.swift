@@ -79,6 +79,16 @@ final class PipoController: ObservableObject {
     private var freehandDragScreenDirection: CGVector = .zero
     private var freehandDragMetersPerPoint: Float = 0
 
+    // Pose-reactive footprint. meshEntity is cached at placement so
+    // refreshFootprint doesn't need to re-search pipo's hierarchy every
+    // frame. footprintOffsets is the XZ convex hull of his current joint
+    // positions, relative to his own position — groundedHeight's sweep
+    // below uses these instead of a fixed circle, so the grounded-check
+    // literally follows his real silhouette every frame, in whatever pose
+    // he's currently in (walking, sitting, climbing, ...).
+    private var meshEntity: ModelEntity?
+    private var footprintOffsets: [SIMD2<Float>] = []
+
     // TEMP: trajectory-drawing prototype
     /// Points placed so far this drawing session, in tap order.
     private var drawnPoints: [PathPoint] = []
@@ -110,14 +120,7 @@ final class PipoController: ObservableObject {
         guard let pipo else { return 0.02 }
         return pipo.visualBounds(relativeTo: nil).extents.y
     }
-    /// Character's bounding capsule radius (half the wider of X/Z extents),
-    /// used by groundedHeight's footprint sweep below.
-    private var characterRadius: Float {
-        guard let pipo else { return 0.01 }
-        let extents = pipo.visualBounds(relativeTo: nil).extents
-        return max(extents.x, extents.z) * 0.5
-    }
-    /// How close beneath the capsule's own base a hit has to be to count as
+    /// How close beneath the footprint's own base a hit has to be to count as
     /// "standing on it," vs. "that's an edge, fall" — the same role a
     /// CharacterController's step-offset plays: a fraction of the
     /// character's OWN height (not a fixed distance scaled by zoom level),
@@ -440,6 +443,8 @@ final class PipoController: ObservableObject {
         gizmoRoot = nil
         gizmoArms = []
         isFreehand = false
+        meshEntity = nil
+        footprintOffsets = []
         clearPathMarkers()
         drawnPoints = []
         pathQueue = []
@@ -499,6 +504,72 @@ final class PipoController: ObservableObject {
         self.pipo = pipo
         state = .idle
         isPlaced = true
+
+        meshEntity = firstMeshEntity(in: pipo)
+        refreshFootprint()
+    }
+
+    /// Rebuilds the footprint used by groundedHeight's sweep from the mesh
+    /// entity's CURRENT joint transforms (HasModel.jointTransforms —
+    /// live/animated, unlike ModelComponent's own mesh resource, which
+    /// stays at bind pose since skinning deforms vertices on the GPU rather
+    /// than mutating CPU-side geometry). Called every frame from update()
+    /// so the grounded-check follows his actual current pose/silhouette,
+    /// not a fixed circle, and not frozen at whatever pose he was in when
+    /// placed.
+    private func refreshFootprint() {
+        guard let pipo, let meshEntity else { return }
+        let localPoints = meshEntity.jointTransforms.map(\.translation)
+        guard localPoints.count >= 4 else { return } // convex hull needs a non-degenerate point set
+        let worldPoints = localPoints.map { meshEntity.convert(position: $0, to: nil) }
+
+        // XZ offsets relative to Pipo's own position, so groundedHeight can
+        // apply them to whatever position it's testing (which may be a
+        // hypothetical next-step position, not necessarily where his
+        // joints currently are).
+        let pipoPosition = pipo.position(relativeTo: nil)
+        let worldXZOffsets = worldPoints.map { SIMD2<Float>($0.x - pipoPosition.x, $0.z - pipoPosition.z) }
+        footprintOffsets = convexHullXZ(worldXZOffsets)
+    }
+
+    private func firstMeshEntity(in entity: Entity) -> ModelEntity? {
+        if let model = entity as? ModelEntity, model.model != nil {
+            return model
+        }
+        for child in entity.children {
+            if let found = firstMeshEntity(in: child) { return found }
+        }
+        return nil
+    }
+
+    /// Standard 2D convex hull (Andrew's monotone chain) over a point set's
+    /// XZ coordinates — used to reduce ~65 joint positions down to the
+    /// handful that actually define his current footprint's outline.
+    private func convexHullXZ(_ points: [SIMD2<Float>]) -> [SIMD2<Float>] {
+        guard points.count >= 3 else { return points }
+        let sorted = points.sorted { $0.x != $1.x ? $0.x < $1.x : $0.y < $1.y }
+
+        func cross(_ o: SIMD2<Float>, _ a: SIMD2<Float>, _ b: SIMD2<Float>) -> Float {
+            (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+        }
+
+        var lower: [SIMD2<Float>] = []
+        for p in sorted {
+            while lower.count >= 2 && cross(lower[lower.count - 2], lower[lower.count - 1], p) <= 0 {
+                lower.removeLast()
+            }
+            lower.append(p)
+        }
+        var upper: [SIMD2<Float>] = []
+        for p in sorted.reversed() {
+            while upper.count >= 2 && cross(upper[upper.count - 2], upper[upper.count - 1], p) <= 0 {
+                upper.removeLast()
+            }
+            upper.append(p)
+        }
+        lower.removeLast()
+        upper.removeLast()
+        return lower + upper
     }
 
     // MARK: - Per-frame update
@@ -506,6 +577,10 @@ final class PipoController: ObservableObject {
     func update(deltaTime dt: Float) {
         guard let pipo else { return }
         time += dt
+
+        // Every frame — groundedHeight's sweep depends on footprintOffsets
+        // being current.
+        refreshFootprint()
 
         switch state {
         case .unplaced:
@@ -670,24 +745,19 @@ final class PipoController: ObservableObject {
                                     mask: .sceneUnderstanding).first?.position.y
     }
 
-    /// Sweeps Pipo's bounding capsule footprint (center plus points around
-    /// its base radius, not just one ray through the middle) straight down
-    /// and returns the height to stand on if any sample is close enough
-    /// beneath to count as support, or nil if the whole footprint has
-    /// walked past an edge. Using several samples across the capsule's
-    /// actual width, rather than a single center ray, is what makes this
-    /// reliable without a debounce counter — a lone raycast can catch a
-    /// stray hole in the LiDAR mesh, or miss a real edge because the
-    /// capsule's center is still over solid ground while its rim already
-    /// isn't; averaging that out across the footprint is the same reason
+    /// Sweeps Pipo's ACTUAL current footprint (the convex hull of his live
+    /// joint positions, recomputed every frame by refreshFootprint — not a
+    /// fixed circle) straight down and returns the height to stand
+    /// on if any sample is close enough beneath to count as support, or nil
+    /// if the whole footprint has walked past an edge. Using several
+    /// samples across the real footprint, rather than a single center ray,
+    /// is what makes this reliable without a debounce counter — a lone
+    /// raycast can catch a stray hole in the LiDAR mesh, or miss a real
+    /// edge because the footprint's center is still over solid ground
+    /// while its rim already isn't; averaging that out is the same reason
     /// real character controllers sweep a shape instead of a ray.
     private func groundedHeight(at position: SIMD3<Float>) -> Float? {
-        let radius = characterRadius
-        let sampleCount = 6
-        let offsets: [SIMD2<Float>] = [.zero] + (0..<sampleCount).map { i in
-            let angle = Float(i) / Float(sampleCount) * 2 * .pi
-            return SIMD2<Float>(cos(angle), sin(angle)) * radius
-        }
+        let offsets = footprintOffsets.isEmpty ? [.zero] : footprintOffsets
 
         var supportedHits: [Float] = []
         for offset in offsets {
