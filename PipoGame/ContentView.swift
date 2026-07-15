@@ -29,7 +29,17 @@ struct ContentView: View {
                                   systemImage: controller.isSitting ? "figure.stand" : "chair")
                                 .frame(maxWidth: .infinity)
                         }
-                        .disabled(!controller.isPlaced || !controller.supportsSit)
+                        .disabled(!controller.isPlaced || !controller.supportsSit || controller.isDrawingPath)
+
+                        // TEMP: trajectory-drawing prototype
+                        Button {
+                            controller.toggleDrawPath()
+                        } label: {
+                            Label(controller.isDrawingPath ? "Go" : "Draw Path",
+                                  systemImage: controller.isDrawingPath ? "checkmark.circle.fill" : "scribble")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(!controller.isPlaced || controller.isSitting)
 
                         Button {
                             startRecording()
@@ -99,6 +109,9 @@ struct ContentView: View {
     private var hint: String {
         if !controller.isPlaced {
             return "Tap a surface to place Pipo"
+        }
+        if controller.isDrawingPath {
+            return "Tap to add path points • tap Go when done"
         }
         if controller.isSitting {
             return "Pipo is sitting — tap Stand first to move him"

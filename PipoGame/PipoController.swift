@@ -32,6 +32,9 @@ final class PipoController: ObservableObject {
     @Published var isSitting = false
     /// Sit is procedural-only until a sit clip is authored for the rigged Pipo.
     @Published var supportsSit = true
+    /// TEMP: trajectory-drawing prototype. While true, taps add path points
+    /// (visualized with markers) instead of moving Pipo immediately.
+    @Published var isDrawingPath = false
 
     /// Set by ContentView; used to stop recording without on-screen UI.
     var onLongPress: (() -> Void)?
@@ -41,6 +44,18 @@ final class PipoController: ObservableObject {
     private var state: State = .unplaced
     private var anchor: AnchorEntity?
     private var pipo: Entity?
+
+    // TEMP: trajectory-drawing prototype
+    /// Points placed so far this drawing session, in tap order.
+    private var drawnPoints: [SIMD3<Float>] = []
+    /// Visual marker entities, one per drawn point that hasn't been reached
+    /// yet — kept in the same order as drawnPoints/pathQueue so arriving at
+    /// a waypoint always removes pathMarkers.first.
+    private var pathMarkers: [AnchorEntity] = []
+    /// Remaining waypoints once a drawn path is committed and being walked;
+    /// the current walk target (state's .walking payload) is NOT in this
+    /// queue — only the ones still to come after it.
+    private var pathQueue: [SIMD3<Float>] = []
 
     // Rigged-clip playback
     private var animationOwner: Entity?
@@ -104,6 +119,10 @@ final class PipoController: ObservableObject {
     // MARK: - Input
 
     func handleTap(on result: ARRaycastResult) {
+        if isDrawingPath {
+            addPathPoint(at: result.worldTransform)
+            return
+        }
         switch state {
         case .unplaced:
             place(at: result.worldTransform)
@@ -118,8 +137,52 @@ final class PipoController: ObservableObject {
         }
     }
 
+    // MARK: - TEMP: trajectory-drawing prototype
+
+    /// Enters drawing mode (only from .idle, with Pipo already placed) or,
+    /// if already drawing, commits the drawn points as a multi-waypoint
+    /// walk and starts moving through them in order.
+    func toggleDrawPath() {
+        guard isPlaced else { return }
+        if isDrawingPath {
+            isDrawingPath = false
+            guard !drawnPoints.isEmpty else { return }
+            pathQueue = drawnPoints
+            drawnPoints = []
+            let first = pathQueue.removeFirst()
+            state = .walking(target: first)
+            startWalkClipIfNeeded()
+        } else {
+            guard case .idle = state else { return }
+            clearPathMarkers()
+            drawnPoints = []
+            pathQueue = []
+            isDrawingPath = true
+        }
+    }
+
+    private func addPathPoint(at transform: simd_float4x4) {
+        guard let arView else { return }
+        let t = transform.columns.3
+        drawnPoints.append([t.x, t.y, t.z])
+
+        let marker = ModelEntity(mesh: .generateSphere(radius: 0.01 * scaleFactor),
+                                 materials: [UnlitMaterial(color: .systemYellow)])
+        let markerAnchor = AnchorEntity(world: transform)
+        markerAnchor.addChild(marker)
+        arView.scene.addAnchor(markerAnchor)
+        pathMarkers.append(markerAnchor)
+    }
+
+    private func clearPathMarkers() {
+        for marker in pathMarkers {
+            marker.removeFromParent()
+        }
+        pathMarkers.removeAll()
+    }
+
     func toggleSit() {
-        guard supportsSit else { return }
+        guard supportsSit, !isDrawingPath else { return }
         switch state {
         case .sitting:
             state = .idle
@@ -151,6 +214,10 @@ final class PipoController: ObservableObject {
         landEntity = nil
         fallVelocity = 0
         edgeConfirmFrames = 0
+        clearPathMarkers()
+        drawnPoints = []
+        pathQueue = []
+        isDrawingPath = false
         state = .unplaced
         isPlaced = false
         isSitting = false
@@ -237,6 +304,17 @@ final class PipoController: ObservableObject {
         let distance = simd_length(heading)
 
         if distance < arrivalDistance {
+            // TEMP: trajectory-drawing prototype — remove the marker for the
+            // waypoint just reached, then continue toward the next queued
+            // point if this was part of a multi-point drawn path.
+            if !pathMarkers.isEmpty {
+                pathMarkers.removeFirst().removeFromParent()
+            }
+            if !pathQueue.isEmpty {
+                let next = pathQueue.removeFirst()
+                state = .walking(target: next)
+                return
+            }
             state = usesClips ? .stoppingWalk : .idle
             return
         }
