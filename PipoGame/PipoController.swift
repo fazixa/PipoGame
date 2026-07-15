@@ -860,14 +860,29 @@ final class PipoController: ObservableObject {
                                     mask: .sceneUnderstanding).first?.position.y
     }
 
-    /// Searches outward from Pipo's current position, in a ring of
-    /// directions, for the nearest edge suitable for the legs-dangling sit
-    /// clip — a spot where solid ground continues right up to a lip and
-    /// then drops away (or ends). Same underlying technique as the
-    /// fall-detection sweep, just used here as an up-front search instead
-    /// of a per-frame trigger. Returns the last solid point before the drop
-    /// (where his pelvis should end up) and the outward direction he
-    /// should walk/face to get there (i.e. the direction his legs would
+    /// Arbitrary-direction raycast against the real LiDAR mesh, returning
+    /// the full hit (position AND surface normal) — the ledge face
+    /// confirmation in findDanglingEdge needs the normal, which the
+    /// height-only helpers above throw away.
+    private func meshRaycastHit(from: SIMD3<Float>, to: SIMD3<Float>) -> CollisionCastHit? {
+        guard let arView else { return nil }
+        return arView.scene.raycast(from: from, to: to, query: .nearest,
+                                    mask: .sceneUnderstanding).first
+    }
+
+    /// Searches outward from Pipo's current position for the nearest edge
+    /// suitable for the legs-dangling sit clip, using the same cascade
+    /// real ledge-grab/climbing systems use: a coarse downward-sample scan
+    /// only APPROXIMATES where the floor stops; the edge is then CONFIRMED
+    /// by raycasting horizontally against the ledge's actual vertical face
+    /// and resolved as the intersection of that face with the top surface.
+    /// This is what the old sample-differencing version couldn't do —
+    /// a LiDAR hole looks identical to a real drop from above, but a hole
+    /// has no face to hit; and the face's surface normal gives the true
+    /// outward direction, instead of whatever oblique angle the scan ray
+    /// happened to approach the edge from (which had him sitting twisted
+    /// relative to the lip). Returns the lip point (where his pelvis
+    /// should end up) and the outward facing (the direction his legs
     /// dangle over), or nil if nothing qualifies within the search radius.
     private func findDanglingEdge() -> (position: SIMD3<Float>, facing: SIMD3<Float>)? {
         guard let pipo else { return nil }
@@ -899,7 +914,6 @@ final class PipoController: ObservableObject {
         let walkableRiseTolerance = characterHeight * 0.2
 
         var best: (position: SIMD3<Float>, facing: SIMD3<Float>, distance: Float)?
-        var candidateEdges: [SIMD3<Float>] = []
 
         for i in 0..<directionCount {
             let angle = Float(i) / Float(directionCount) * 2 * .pi
@@ -956,33 +970,109 @@ final class PipoController: ObservableObject {
                     distance += stepSize
                     continue
                 }
-                // A real drop — either no ground found at all (open space)
-                // or a fall deep enough to actually clear his dangling
-                // legs. lastSolidPoint is still up to a full stepSize short
-                // of the true edge, since we only sampled at fixed
-                // intervals — binary-search between it and samplePoint
-                // (already confirmed past the edge) to narrow in on the
-                // actual boundary before recording this candidate.
-                var solidPoint = lastSolidPoint
-                var solidGroundY = lastSolidGroundY
-                var farPoint = samplePoint
-                for _ in 0..<6 {
-                    let midPoint = (solidPoint + farPoint) / 2
-                    if let midGroundY = meshGroundHeight(at: midPoint),
-                       solidGroundY - midGroundY < minimumDropDepth {
-                        solidPoint = midPoint
-                        solidGroundY = midGroundY
-                    } else {
-                        farPoint = midPoint
+                // A drop registered just before samplePoint.
+                // Now CONFIRM it the way ledge-grab systems do, instead of
+                // trusting the height differencing:
+                //
+                // Phase 2 — face confirmation at SEVERAL depths below the
+                // top surface, shallowest first: a box or wall has a tall
+                // vertical face (any depth hits), but a tabletop is a thin
+                // slab with nothing but air beneath — its only vertical
+                // geometry is the few-cm band of the slab's own side, so
+                // only the probe just under the lip can catch it.
+                let probeX = samplePoint.x + direction.x * stepSize
+                let probeZ = samplePoint.z + direction.z * stepSize
+                var faceHit: CollisionCastHit?
+                for depthFactor: Float in [0.08, 0.25, 0.45] {
+                    let start = SIMD3<Float>(probeX,
+                                             lastSolidGroundY - characterHeight * depthFactor,
+                                             probeZ)
+                    if let hit = meshRaycastHit(from: start, to: start - direction * (stepSize * 4)) {
+                        faceHit = hit
+                        break
                     }
                 }
-                let edgePosition = SIMD3<Float>(solidPoint.x, solidGroundY, solidPoint.z)
-                candidateEdges.append(edgePosition)
+
+                var facing = direction
+                let lipX: Float
+                let lipZ: Float
+                let topY: Float
+
+                if let faceHit {
+                    // Face found. Its surface normal, flattened to the
+                    // horizontal plane, is the true outward direction over
+                    // the drop — flipped if the reconstructed triangle
+                    // happened to wind the other way. The face X/Z plus the
+                    // top surface just inside it are the exact edge.
+                    var n = faceHit.normal
+                    n.y = 0
+                    let normalLength = simd_length(n)
+                    if normalLength > 0.001 { facing = n / normalLength }
+                    if simd_dot(facing, direction) < 0 { facing = -facing }
+                    addEdgeDebugMarker(at: faceHit.position, color: .systemTeal,
+                                       radius: characterHeight * 0.02)
+                    let inset = characterHeight * 0.05
+                    lipX = faceHit.position.x - facing.x * inset
+                    lipZ = faceHit.position.z - facing.z * inset
+                    guard let lipTopY = meshGroundHeight(at: SIMD3<Float>(lipX, lastSolidGroundY, lipZ)),
+                          abs(lipTopY - lastSolidGroundY) < walkableRiseTolerance else {
+                        break
+                    }
+                    topY = lipTopY
+                } else if sampleGroundY != nil {
+                    // No face at any depth, but the sample beyond the drop
+                    // hit REAL mesh far below (e.g. the floor under a
+                    // table) — that's a genuine edge whose vertical side
+                    // just isn't reconstructed, not a scan hole. Fall back
+                    // to refining the lip by binary search between the last
+                    // solid sample and this one; facing stays the scan
+                    // direction since there's no normal to read.
+                    var solid = lastSolidPoint
+                    var solidY = lastSolidGroundY
+                    var far = samplePoint
+                    for _ in 0..<6 {
+                        let mid = (solid + far) / 2
+                        if let midY = meshGroundHeight(at: mid),
+                           solidY - midY < minimumDropDepth {
+                            solid = mid
+                            solidY = midY
+                        } else {
+                            far = mid
+                        }
+                    }
+                    lipX = solid.x
+                    lipZ = solid.z
+                    topY = solidY
+                    addEdgeDebugMarker(at: SIMD3<Float>(lipX, topY, lipZ), color: .systemIndigo,
+                                       radius: characterHeight * 0.02)
+                } else {
+                    // No face AND no mesh below at all — indistinguishable
+                    // from an unscanned hole; reject.
+                    addEdgeDebugMarker(at: SIMD3<Float>(probeX, lastSolidGroundY, probeZ),
+                                       color: .systemYellow,
+                                       radius: characterHeight * 0.02)
+                    break
+                }
+
+                let edgePosition = SIMD3<Float>(lipX, topY, lipZ)
+
+                // Phase 4 — clearance: just outside the lip, where his
+                // legs will hang, re-verify the drop really is deep enough.
+                let clearInset = characterHeight * 0.15
+                if let outsideY = meshGroundHeight(at: SIMD3<Float>(lipX + facing.x * clearInset,
+                                                                    topY,
+                                                                    lipZ + facing.z * clearInset)),
+                   topY - outsideY < minimumDropDepth {
+                    break
+                }
+
                 addEdgeDebugMarker(at: edgePosition, color: .systemRed, radius: characterHeight * 0.03)
-                // Keep whichever qualifying edge is closest to Pipo's start
+                // Keep whichever confirmed edge is closest to Pipo's start
                 // position across all directions.
-                if best == nil || distance < best!.distance {
-                    best = (position: edgePosition, facing: direction, distance: distance)
+                let edgeDistance = simd_length(SIMD3<Float>(edgePosition.x - origin.x, 0,
+                                                            edgePosition.z - origin.z))
+                if best == nil || edgeDistance < best!.distance {
+                    best = (position: edgePosition, facing: facing, distance: edgeDistance)
                 }
                 break
             }
