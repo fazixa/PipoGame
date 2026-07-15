@@ -101,6 +101,38 @@ final class PipoController: ObservableObject {
     /// queue — only the ones still to come after it.
     private var pathQueue: [PathPoint] = []
 
+    // TEMP: edge-dangling sit prototype. When toggleSit() finds a nearby
+    // ledge, it walks Pipo there via the normal .walking state instead of
+    // sitting in place — these carry the "sit once you arrive, facing this
+    // direction" intent through that walk, since PathPoint/State don't
+    // otherwise have anywhere to store it.
+    private var sitAfterWalkArrival = false
+    private var pendingSitFacing: SIMD3<Float>?
+    /// The edge's real surface height — the target the one-shot pelvis
+    /// correction below aligns the live Hips joint to once the sit clip
+    /// has actually taken over the pose.
+    private var pendingSitTargetY: Float?
+    /// Counts up once .sitting begins; at pelvisCorrectionDelay the sit
+    /// clip's crossfade (see startSitClipIfNeeded) has finished blending
+    /// in, so meshEntity.jointTransforms reflects the real seated pose and
+    /// it's safe to sample the Hips joint for the one-shot correction.
+    private var pelvisCorrectionTimer: Float?
+    private let pelvisCorrectionDelay: Float = 0.3
+    /// The Hips joint's own pivot isn't exactly at the lowest point of his
+    /// seated geometry, so aligning it exactly to the surface leaves him
+    /// sinking in a bit — small upward bias on top of the precise
+    /// correction to compensate. Tune directly if he's still in/above the
+    /// surface.
+    private var pelvisHeightBias: Float { characterHeight * 0.03 }
+    /// DEBUG: visualizes findDanglingEdge's search — small dots at every
+    /// probed sample point, colored by outcome, plus the winning edge.
+    /// Cleared and rebuilt on each search.
+    private var edgeDebugMarkers: [AnchorEntity] = []
+    /// TEMP DEBUG: while true, tapping Sit only runs findDanglingEdge for
+    /// its marker visualization — Pipo doesn't actually walk or sit. Flip
+    /// to false to restore the real behavior once the search looks right.
+    private let edgeSearchDebugOnly = false
+
     // Rigged-clip playback
     private var animationOwner: Entity?
     private var walkClip: AnimationResource?
@@ -168,7 +200,6 @@ final class PipoController: ObservableObject {
     private let stepRate: Float = 11                          // procedural gait, rad/s
     // TEMP: climb prototype — fallback lerp speed if no climb clip loaded.
     private var climbSpeed: Float { walkSpeed * 0.5 }
-
     // MARK: - Input
 
     /// Only places Pipo on first tap — tap-to-walk is disabled in the main
@@ -404,11 +435,25 @@ final class PipoController: ObservableObject {
             startWalkClipIfNeeded()
             isSitting = false
         case .idle, .walking, .stoppingWalk:
-            // Deliberately NOT stopping walkPlayback here — leaving it
-            // playing lets startSitClipIfNeeded's playAnimation crossfade
-            // directly from the walk/idle pose into the sit pose.
-            state = .sitting
-            isSitting = true
+            // TEMP DEBUG: edgeSearchDebugOnly gate below — set to false to
+            // restore the real walk-there-and-sit behavior.
+            guard let edge = findDanglingEdge() else {
+                if !edgeSearchDebugOnly {
+                    // Deliberately NOT stopping walkPlayback here — leaving
+                    // it playing lets startSitClipIfNeeded's playAnimation
+                    // crossfade directly from the walk/idle pose into the
+                    // sit pose.
+                    state = .sitting
+                    isSitting = true
+                }
+                return
+            }
+            guard !edgeSearchDebugOnly else { return }
+            pendingSitFacing = edge.facing
+            pendingSitTargetY = edge.position.y
+            sitAfterWalkArrival = true
+            state = .walking(target: PathPoint(position: edge.position, isVertical: false))
+            startWalkClipIfNeeded()
         case .unplaced, .falling, .landing, .climbing:
             break // TEMP: can't sit mid-air, mid-landing, or mid-climb
         }
@@ -445,6 +490,11 @@ final class PipoController: ObservableObject {
         isFreehand = false
         meshEntity = nil
         footprintOffsets = []
+        sitAfterWalkArrival = false
+        pendingSitFacing = nil
+        pendingSitTargetY = nil
+        pelvisCorrectionTimer = nil
+        clearEdgeDebugMarkers()
         clearPathMarkers()
         drawnPoints = []
         pathQueue = []
@@ -532,6 +582,43 @@ final class PipoController: ObservableObject {
         footprintOffsets = convexHullXZ(worldXZOffsets)
     }
 
+    /// One-shot correction, run once the sit clip's crossfade has finished
+    /// (see pelvisCorrectionTimer), that reads the LIVE Hips joint's actual
+    /// world position — same jointTransforms data refreshFootprint uses —
+    /// and shifts Pipo's root vertically so the real pelvis lands exactly
+    /// on pendingSitTargetY (the edge's true surface height), instead of
+    /// guessing a fixed downward offset that doesn't account for however
+    /// this specific clip actually holds the pelvis relative to the root.
+    private func correctPelvisHeight(pipo: Entity) {
+        // Match by suffix, not exact name — the USD export fix sanitizes
+        // ":" to "_" in joint names ("mixamorig:Hips" -> "mixamorig_Hips"),
+        // so an exact-name lookup for the original Mixamo name silently
+        // never matched, meaning this whole function was a no-op.
+        guard let meshEntity, let targetY = pendingSitTargetY,
+              let hipsIndex = meshEntity.jointNames.firstIndex(where: { $0.hasSuffix("Hips") }) else {
+            pendingSitTargetY = nil
+            return
+        }
+        let hipsLocal = meshEntity.jointTransforms[hipsIndex].translation
+        let hipsWorldBefore = meshEntity.convert(position: hipsLocal, to: nil)
+        // DEBUG: purple = where the Hips joint was actually sampled BEFORE
+        // correcting — compare against the green edge marker to see
+        // whether the measurement itself lines up with the target. Marker
+        // material has depth-testing disabled (see addEdgeDebugMarker) so
+        // it renders through his own body instead of being hidden inside it.
+        addEdgeDebugMarker(at: hipsWorldBefore, color: .systemPurple, radius: characterHeight * 0.04)
+
+        var position = pipo.position(relativeTo: nil)
+        position.y -= (hipsWorldBefore.y - targetY) - pelvisHeightBias
+        pipo.setPosition(position, relativeTo: nil)
+
+        // DEBUG: cyan = where the Hips joint ends up AFTER correcting —
+        // should land exactly on the green target if the math is right.
+        let hipsWorldAfter = meshEntity.convert(position: hipsLocal, to: nil)
+        addEdgeDebugMarker(at: hipsWorldAfter, color: .systemCyan, radius: characterHeight * 0.04)
+        pendingSitTargetY = nil
+    }
+
     private func firstMeshEntity(in entity: Entity) -> ModelEntity? {
         if let model = entity as? ModelEntity, model.model != nil {
             return model
@@ -601,6 +688,15 @@ final class PipoController: ObservableObject {
             } else {
                 animateSit(pipo: pipo, dt: dt)
             }
+            if var timer = pelvisCorrectionTimer {
+                timer += dt
+                if timer >= pelvisCorrectionDelay {
+                    correctPelvisHeight(pipo: pipo)
+                    pelvisCorrectionTimer = nil
+                } else {
+                    pelvisCorrectionTimer = timer
+                }
+            }
 
         case .falling(let resumeTarget, let landingPosition):
             fall(pipo: pipo, resumeTarget: resumeTarget, landingPosition: landingPosition, dt: dt)
@@ -649,6 +745,22 @@ final class PipoController: ObservableObject {
                 state = .walking(target: next)
                 return
             }
+            // TEMP: edge-dangling sit prototype — arrived at the ledge
+            // toggleSit() found; face outward over the drop (the direction
+            // findDanglingEdge recorded) and sit there, instead of the
+            // normal stop-walking fallback.
+            if sitAfterWalkArrival {
+                sitAfterWalkArrival = false
+                if let facing = pendingSitFacing {
+                    pipo.setOrientation(simd_quatf(angle: atan2(facing.x, facing.z), axis: [0, 1, 0]),
+                                        relativeTo: nil)
+                }
+                pendingSitFacing = nil
+                pelvisCorrectionTimer = 0
+                state = .sitting
+                isSitting = true
+                return
+            }
             state = usesClips ? .stoppingWalk : .idle
             return
         }
@@ -658,14 +770,17 @@ final class PipoController: ObservableObject {
         let step = min(walkSpeed * dt, distance)
         position += direction * step
 
-        // Kinematic character-controller-style grounded check, done at
-        // Pipo's own (already-stepped) position — no forward prediction.
-        // This is how Unity's CharacterController / Unreal's
-        // CharacterMovementComponent do it: sweep the capsule's footprint
-        // straight down every frame; if it's still supported, snap onto it
-        // (handles slopes/small bumps/steps), and if not, you're falling,
-        // starting exactly where you already are.
-        if let groundY = groundedHeight(at: position) {
+        if sitAfterWalkArrival {
+            // This walk is a deliberate approach to a ledge already
+            // validated by findDanglingEdge — the normal grounded-check
+            // below would misfire here, since part of his footprint is
+            // SUPPOSED to end up overhanging the drop as he nears the
+            // edge. Skip it and just glide his height toward the
+            // already-known target Y instead of re-querying the ground
+            // (and potentially reading "not supported") every step.
+            position.y = damp(position.y, target.position.y, rate: 12, dt: dt)
+            pipo.setPosition(position, relativeTo: nil)
+        } else if let groundY = groundedHeight(at: position) {
             position.y = damp(position.y, groundY, rate: 12, dt: dt)
             pipo.setPosition(position, relativeTo: nil)
         } else if usesClips, landClip != nil {
@@ -745,6 +860,182 @@ final class PipoController: ObservableObject {
                                     mask: .sceneUnderstanding).first?.position.y
     }
 
+    /// Searches outward from Pipo's current position, in a ring of
+    /// directions, for the nearest edge suitable for the legs-dangling sit
+    /// clip — a spot where solid ground continues right up to a lip and
+    /// then drops away (or ends). Same underlying technique as the
+    /// fall-detection sweep, just used here as an up-front search instead
+    /// of a per-frame trigger. Returns the last solid point before the drop
+    /// (where his pelvis should end up) and the outward direction he
+    /// should walk/face to get there (i.e. the direction his legs would
+    /// dangle over), or nil if nothing qualifies within the search radius.
+    private func findDanglingEdge() -> (position: SIMD3<Float>, facing: SIMD3<Float>)? {
+        guard let pipo else { return nil }
+        let origin = pipo.position(relativeTo: nil)
+
+        clearEdgeDebugMarkers()
+        guard let originGroundY = meshGroundHeight(at: origin) else { return nil }
+
+        let searchRadius = characterHeight * 6
+        let stepSize = characterHeight * 0.3
+        let directionCount = 12
+        // Only search the half facing whichever way Pipo's currently
+        // facing — no reason to consider ledges behind him.
+        let forward = pipo.orientation(relativeTo: nil).act(SIMD3<Float>(0, 0, 1))
+        // The sit clip's legs hang roughly half a character-height below
+        // the pelvis (baked into the origin shift done on export) — a
+        // "step" shallower than this isn't a real dangling edge, since his
+        // legs would just come to rest on whatever's immediately below
+        // instead of clearing it and hanging in open air. Also protects
+        // against small height noise in the LiDAR mesh being misread as an
+        // edge, which was causing the search to stop almost immediately.
+        let minimumDropDepth = characterHeight
+        // A rise taller than this is an obstacle, not a step Pipo could
+        // actually walk up — searching wasn't checking for this, so a
+        // direction that walked up onto something raised (e.g. climbing
+        // onto a table's own surface) would keep going from THAT height
+        // and could report a "candidate edge" measured above where he
+        // started, which he could never actually walk to.
+        let walkableRiseTolerance = characterHeight * 0.2
+
+        var best: (position: SIMD3<Float>, facing: SIMD3<Float>, distance: Float)?
+        var candidateEdges: [SIMD3<Float>] = []
+
+        for i in 0..<directionCount {
+            let angle = Float(i) / Float(directionCount) * 2 * .pi
+            let direction = SIMD3<Float>(cos(angle), 0, sin(angle))
+            guard simd_dot(direction, forward) > 0 else { continue } // behind him — skip
+
+            var lastSolidPoint = origin
+            var lastSolidGroundY = originGroundY
+            var distance = stepSize
+
+            while distance <= searchRadius {
+                let samplePoint = origin + direction * distance
+                var sampleGroundY = meshGroundHeight(at: samplePoint)
+                var usedEstimatedFallback = false
+
+                if sampleGroundY == nil {
+                    // No real-mesh hit — could be genuine open space (an
+                    // edge) or just an area the LiDAR scan hasn't finished
+                    // reconstructing yet. Cross-check ARKit's estimated-
+                    // plane fallback: if it still finds a surface near the
+                    // last known height, this is probably just unscanned
+                    // rather than a real drop, so treat it as still-solid
+                    // and keep going instead of reading it as an edge.
+                    if let estimated = groundHeight(at: samplePoint),
+                       abs(estimated - lastSolidGroundY) < minimumDropDepth {
+                        sampleGroundY = estimated
+                        usedEstimatedFallback = true
+                    }
+                }
+                let drop = sampleGroundY.map { lastSolidGroundY - $0 } ?? Float.greatestFiniteMagnitude
+                let rise = sampleGroundY.map { $0 - lastSolidGroundY } ?? 0
+
+                if rise > walkableRiseTolerance {
+                    // Too tall to just walk up (e.g. the side of a table) —
+                    // a dead end for this direction. Don't continue "onto"
+                    // it and search from up there; stop with no edge found.
+                    addEdgeDebugMarker(at: samplePoint, color: .systemOrange,
+                                       radius: characterHeight * 0.02)
+                    break
+                }
+
+                if drop < minimumDropDepth {
+                    // Same surface, a small step, or even a slight rise —
+                    // not a real dangling edge. Keep probing outward from
+                    // here, whatever height it settles at.
+                    let markerY = sampleGroundY ?? samplePoint.y
+                    addEdgeDebugMarker(at: SIMD3<Float>(samplePoint.x, markerY, samplePoint.z),
+                                       color: usedEstimatedFallback ? .systemBlue : .systemGray,
+                                       radius: characterHeight * 0.02)
+                    if let sampleGroundY {
+                        lastSolidPoint = samplePoint
+                        lastSolidGroundY = sampleGroundY
+                    }
+                    distance += stepSize
+                    continue
+                }
+                // A real drop — either no ground found at all (open space)
+                // or a fall deep enough to actually clear his dangling
+                // legs. lastSolidPoint is still up to a full stepSize short
+                // of the true edge, since we only sampled at fixed
+                // intervals — binary-search between it and samplePoint
+                // (already confirmed past the edge) to narrow in on the
+                // actual boundary before recording this candidate.
+                var solidPoint = lastSolidPoint
+                var solidGroundY = lastSolidGroundY
+                var farPoint = samplePoint
+                for _ in 0..<6 {
+                    let midPoint = (solidPoint + farPoint) / 2
+                    if let midGroundY = meshGroundHeight(at: midPoint),
+                       solidGroundY - midGroundY < minimumDropDepth {
+                        solidPoint = midPoint
+                        solidGroundY = midGroundY
+                    } else {
+                        farPoint = midPoint
+                    }
+                }
+                let edgePosition = SIMD3<Float>(solidPoint.x, solidGroundY, solidPoint.z)
+                candidateEdges.append(edgePosition)
+                addEdgeDebugMarker(at: edgePosition, color: .systemRed, radius: characterHeight * 0.03)
+                // Keep whichever qualifying edge is closest to Pipo's start
+                // position across all directions.
+                if best == nil || distance < best!.distance {
+                    best = (position: edgePosition, facing: direction, distance: distance)
+                }
+                break
+            }
+        }
+
+        guard let found = best else { return nil }
+        addEdgeDebugMarker(at: found.position, color: .systemGreen, radius: characterHeight * 0.05)
+        addEdgeDebugLine(from: origin, to: found.position, color: .systemGreen)
+        return (found.position, found.facing)
+    }
+
+    /// DEBUG: small sphere marker used by findDanglingEdge's visualization.
+    /// Depth-testing disabled so it renders through occluding geometry
+    /// (e.g. Pipo's own body) instead of being hidden inside/behind it.
+    private func addEdgeDebugMarker(at position: SIMD3<Float>, color: UIColor, radius: Float) {
+        guard let arView else { return }
+        var material = UnlitMaterial(color: color)
+        material.readsDepth = false
+        material.writesDepth = false
+        let marker = ModelEntity(mesh: .generateSphere(radius: max(radius, 0.001)),
+                                 materials: [material])
+        let anchor = AnchorEntity(world: position)
+        anchor.addChild(marker)
+        arView.scene.addAnchor(anchor)
+        edgeDebugMarkers.append(anchor)
+    }
+
+    /// DEBUG: thin line from Pipo's start position to the winning edge, so
+    /// the picked direction is visible at a glance.
+    private func addEdgeDebugLine(from: SIMD3<Float>, to: SIMD3<Float>, color: UIColor) {
+        guard let arView else { return }
+        let delta = to - from
+        let length = simd_length(delta)
+        guard length > 0.001 else { return }
+        var material = UnlitMaterial(color: color)
+        material.readsDepth = false
+        material.writesDepth = false
+        let line = ModelEntity(mesh: .generateCylinder(height: length, radius: characterHeight * 0.006),
+                               materials: [material])
+        line.orientation = simd_quaternion([0, 1, 0], delta / length)
+        let anchor = AnchorEntity(world: from + delta / 2)
+        anchor.addChild(line)
+        arView.scene.addAnchor(anchor)
+        edgeDebugMarkers.append(anchor)
+    }
+
+    private func clearEdgeDebugMarkers() {
+        for marker in edgeDebugMarkers {
+            marker.removeFromParent()
+        }
+        edgeDebugMarkers.removeAll()
+    }
+
     /// Sweeps Pipo's ACTUAL current footprint (the convex hull of his live
     /// joint positions, recomputed every frame by refreshFootprint — not a
     /// fixed circle) straight down and returns the height to stand
@@ -767,11 +1058,21 @@ final class PipoController: ObservableObject {
             }
         }
 
-        // Step up onto the highest supported point under the footprint
-        // (e.g. one edge of the capsule still on a slightly raised lip)
-        // rather than averaging, matching a CharacterController's
-        // step-offset behavior.
-        return supportedHits.max()
+        guard !supportedHits.isEmpty else { return nil }
+        // Median rather than max: max matches a CharacterController's
+        // step-offset behavior for a real small lip under one edge of the
+        // footprint, but it also means a single bad sample — e.g. a
+        // raycast near furniture (a sofa, a table) clipping the object's
+        // own surface instead of the real floor, which LiDAR often can't
+        // see under/behind occluded furniture in the first place — can
+        // override every other correctly-grounded sample and drag his
+        // whole height up to match that one outlier. Median stays robust
+        // to one stray high (or low) reading as long as most of the
+        // footprint agrees, at the cost of being slightly less eager about
+        // stepping onto a real small lip that only one sample touches.
+        let sorted = supportedHits.sorted()
+        let mid = sorted.count / 2
+        return sorted.count % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
     }
 
     // MARK: - Fall/landing prototype
