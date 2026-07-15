@@ -26,6 +26,12 @@ enum PipoAsset {
         /// reset+reload). Held here so it stays retained for as long as
         /// the character using its clip does.
         let landEntity: Entity?
+        /// TEMP: climb clip, played while scaling a wall marked with a red
+        /// (vertical) path point. Same loading pattern as landClip.
+        let climbClip: AnimationResource?
+        /// TEMP: keeps the ClimbTest entity that climbClip came from alive —
+        /// see landEntity's doc comment for why this matters.
+        let climbEntity: Entity?
     }
 
     static func load() -> LoadedPipo? {
@@ -56,8 +62,14 @@ enum PipoAsset {
         print("DEBUG landClip extracted:", landClip != nil,
               "duration:", landClip?.definition.duration ?? -1)
 
+        // TEMP: same loading pattern as landClip — ClimbTest.usdz shares the
+        // WalkTest skeleton, so its clip plays directly on the walk entity.
+        let climbEntity = try? Entity.load(named: "ClimbTest")
+        let climbClip = climbEntity.flatMap(firstEntityWithAnimations)?.availableAnimations.first
+
         return LoadedPipo(root: root, animationOwner: owner, walkClip: clip,
-                          landClip: landClip, landEntity: landEntity)
+                          landClip: landClip, landEntity: landEntity,
+                          climbClip: climbClip, climbEntity: climbEntity)
     }
 
     private static func firstEntityWithAnimations(in entity: Entity) -> Entity? {

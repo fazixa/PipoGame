@@ -13,10 +13,21 @@ import simd
 ///   used only if the USDZ fails to load.
 final class PipoController: ObservableObject {
 
+    /// TEMP: trajectory-drawing prototype. A drawn waypoint plus whether the
+    /// surface it was tapped on is vertical (a wall) or horizontal (ground/
+    /// ledge) — read from the tap's surface normal and shown as a red vs.
+    /// yellow marker. Reaching a vertical point triggers climbing (straight
+    /// up the wall face to whatever's next), reaching a horizontal one
+    /// resumes normal walking.
+    struct PathPoint {
+        let position: SIMD3<Float>
+        let isVertical: Bool
+    }
+
     enum State {
         case unplaced
         case idle
-        case walking(target: SIMD3<Float>)
+        case walking(target: PathPoint)
         /// Rigged path only: finish the current step, then freeze the clip.
         case stoppingWalk
         case sitting
@@ -25,9 +36,14 @@ final class PipoController: ObservableObject {
         /// the edge, in the direction Pipo was walking, so he doesn't drop
         /// straight down off the lip), resumeTarget is the original walk
         /// destination to continue toward once landed.
-        case falling(resumeTarget: SIMD3<Float>, landingPosition: SIMD3<Float>)
+        case falling(resumeTarget: PathPoint, landingPosition: SIMD3<Float>)
         /// TEMP: hard-landing clip playing on impact, then resumes walking.
-        case landing(resumeTarget: SIMD3<Float>)
+        case landing(resumeTarget: PathPoint)
+        /// TEMP: climb prototype. Climbing straight up the wall face from
+        /// startPosition to target's position (X/Z pinned to the wall's own
+        /// point — see climb() for why). startTime is a snapshot of `time`
+        /// when this climb segment began, used to compute progress.
+        case climbing(target: PathPoint, startPosition: SIMD3<Float>, startTime: Float)
     }
 
     @Published var isPlaced = false
@@ -49,7 +65,7 @@ final class PipoController: ObservableObject {
 
     // TEMP: trajectory-drawing prototype
     /// Points placed so far this drawing session, in tap order.
-    private var drawnPoints: [SIMD3<Float>] = []
+    private var drawnPoints: [PathPoint] = []
     /// Visual marker entities, one per drawn point that hasn't been reached
     /// yet — kept in the same order as drawnPoints/pathQueue so arriving at
     /// a waypoint always removes pathMarkers.first.
@@ -57,7 +73,7 @@ final class PipoController: ObservableObject {
     /// Remaining waypoints once a drawn path is committed and being walked;
     /// the current walk target (state's .walking payload) is NOT in this
     /// queue — only the ones still to come after it.
-    private var pathQueue: [SIMD3<Float>] = []
+    private var pathQueue: [PathPoint] = []
 
     // Rigged-clip playback
     private var animationOwner: Entity?
@@ -95,6 +111,14 @@ final class PipoController: ObservableObject {
     private var edgeConfirmFrames = 0
     private let edgeConfirmThreshold = 6  // ~0.1s at 60fps
 
+    // TEMP: climb prototype. Reaching a red (vertical) path point triggers
+    // climbing to whatever's next in the queue, instead of the normal
+    // grounded walk.
+    private var climbClip: AnimationResource?
+    private var climbPlayback: AnimationPlaybackController?
+    /// Keeps climbClip's source entity retained — see landEntity for why.
+    private var climbEntity: Entity?
+
     private var time: Float = 0
     private var walkPhase: Float = 0
     private var baseScale: Float = 1
@@ -116,6 +140,8 @@ final class PipoController: ObservableObject {
     // Revert to 0.16 when swapping back to Pipo.
     private var walkSpeed: Float { (usesClips ? 0.0173 : 0.22) * scaleFactor }  // m/s
     private let stepRate: Float = 11                          // procedural gait, rad/s
+    // TEMP: climb prototype — fallback lerp speed if no climb clip loaded.
+    private var climbSpeed: Float { walkSpeed * 0.5 }
 
     // MARK: - Input
 
@@ -129,11 +155,11 @@ final class PipoController: ObservableObject {
             place(at: result.worldTransform)
         case .sitting:
             break // hint tells the user to stand first
-        case .falling, .landing:
-            break // TEMP: fall/landing prototype — ignore taps mid-sequence
+        case .falling, .landing, .climbing:
+            break // TEMP: fall/landing/climb prototype — ignore taps mid-sequence
         case .idle, .walking, .stoppingWalk:
             let t = result.worldTransform.columns.3
-            state = .walking(target: [t.x, t.y, t.z])
+            state = .walking(target: PathPoint(position: [t.x, t.y, t.z], isVertical: false))
             startWalkClipIfNeeded()
         }
     }
@@ -165,13 +191,14 @@ final class PipoController: ObservableObject {
     private func addPathPoint(at transform: simd_float4x4) {
         guard let arView else { return }
         let t = transform.columns.3
-        drawnPoints.append([t.x, t.y, t.z])
 
         // Surface orientation read from the raycast result's own up-axis
         // (column 1) — a tap that landed on a wall reads as vertical (red),
         // ground/ledge taps as horizontal (yellow).
         let upY = transform.columns.1.y
         let isVertical = abs(upY) < 0.5
+        drawnPoints.append(PathPoint(position: [t.x, t.y, t.z], isVertical: isVertical))
+
         let marker = ModelEntity(mesh: .generateSphere(radius: 0.004 * scaleFactor),
                                  materials: [UnlitMaterial(color: isVertical ? .systemRed : .systemYellow)])
         let markerAnchor = AnchorEntity(world: transform)
@@ -196,8 +223,8 @@ final class PipoController: ObservableObject {
         case .idle, .walking, .stoppingWalk:
             state = .sitting
             isSitting = true
-        case .unplaced, .falling, .landing:
-            break // TEMP: can't sit mid-air or mid-landing
+        case .unplaced, .falling, .landing, .climbing:
+            break // TEMP: can't sit mid-air, mid-landing, or mid-climb
         }
     }
 
@@ -220,6 +247,9 @@ final class PipoController: ObservableObject {
         landEntity = nil
         fallVelocity = 0
         edgeConfirmFrames = 0
+        climbClip = nil
+        climbPlayback = nil
+        climbEntity = nil
         clearPathMarkers()
         drawnPoints = []
         pathQueue = []
@@ -242,6 +272,8 @@ final class PipoController: ObservableObject {
             landClip = loaded.landClip
             landClipDuration = loaded.landClip?.definition.duration ?? 1
             landEntity = loaded.landEntity
+            climbClip = loaded.climbClip
+            climbEntity = loaded.climbEntity
             supportsSit = false
         } else {
             pipo = PipoBuilder.build()
@@ -300,12 +332,15 @@ final class PipoController: ObservableObject {
 
         case .landing(let resumeTarget):
             updateLanding(pipo: pipo, resumeTarget: resumeTarget)
+
+        case .climbing(let target, let startPosition, let startTime):
+            climb(pipo: pipo, target: target, startPosition: startPosition, startTime: startTime)
         }
     }
 
-    private func walk(pipo: Entity, toward target: SIMD3<Float>, dt: Float) {
+    private func walk(pipo: Entity, toward target: PathPoint, dt: Float) {
         var position = pipo.position(relativeTo: nil)
-        var heading = target - position
+        var heading = target.position - position
         heading.y = 0
         let distance = simd_length(heading)
 
@@ -319,6 +354,20 @@ final class PipoController: ObservableObject {
             // point if this was part of a multi-point drawn path.
             if !pathMarkers.isEmpty {
                 pathMarkers.removeFirst().removeFromParent()
+            }
+            // TEMP: climb prototype — a red (vertical) point marks the base
+            // of a wall. Climb straight up it toward whatever's next in the
+            // queue instead of continuing to walk.
+            if target.isVertical, !pathQueue.isEmpty {
+                let next = pathQueue.removeFirst()
+                // Deliberately NOT stopping walkPlayback here — leaving it
+                // playing lets startClimbClipIfNeeded's playAnimation crossfade
+                // directly from the walk pose into the climb pose. Stopping it
+                // first was cutting the walk clip before the blend had anything
+                // to blend from, so Pipo snapped to a static bind pose for a
+                // frame before the climb clip faded in.
+                state = .climbing(target: next, startPosition: position, startTime: time)
+                return
             }
             if !pathQueue.isEmpty {
                 let next = pathQueue.removeFirst()
@@ -414,7 +463,7 @@ final class PipoController: ObservableObject {
 
     // MARK: - Fall/landing prototype
 
-    private func fall(pipo: Entity, resumeTarget: SIMD3<Float>, landingPosition: SIMD3<Float>, dt: Float) {
+    private func fall(pipo: Entity, resumeTarget: PathPoint, landingPosition: SIMD3<Float>, dt: Float) {
         fallVelocity += gravity * dt
         var position = pipo.position(relativeTo: nil)
         position.y -= fallVelocity * dt
@@ -444,7 +493,7 @@ final class PipoController: ObservableObject {
         pipo.setPosition(position, relativeTo: nil)
     }
 
-    private func updateLanding(pipo: Entity, resumeTarget: SIMD3<Float>) {
+    private func updateLanding(pipo: Entity, resumeTarget: PathPoint) {
         guard let playback = landPlayback, playback.isValid,
               playback.time < landClipDuration - 0.05 else {
             print("DEBUG updateLanding: bailing to walk, playback=\(landPlayback != nil) valid=\(landPlayback?.isValid ?? false) time=\(landPlayback?.time ?? -1)")
@@ -467,6 +516,77 @@ final class PipoController: ObservableObject {
         landPlayback?.stop()
         landPlayback = owner.playAnimation(clip, transitionDuration: 0, startsPaused: true)
         print("DEBUG startLandClip: created paused playback, valid=\(landPlayback?.isValid ?? false)")
+    }
+
+    // MARK: - Climb prototype
+
+    /// Climbs straight up the wall face: horizontal position stays pinned
+    /// to the wall's own point (`target`, where the red marker was placed)
+    /// while only height changes over time — mirrors how walking only ever
+    /// moves X/Z and lets Y follow the ground, so this doesn't cut a
+    /// diagonal path through the air between wherever the walk stopped and
+    /// the target.
+    private func climb(pipo: Entity, target: PathPoint, startPosition: SIMD3<Float>, startTime: Float) {
+        let elapsed = time - startTime
+        // The climb clip is a self-contained reach cycle that returns
+        // exactly to its start pose (verified against the exported hip
+        // bone: first and last frame match) — it's meant to be looped
+        // continuously while code drives the actual climb rate, the same
+        // way the walk clip loops while walkSpeed drives ground movement.
+        // Locking total movement duration to one non-repeating playthrough
+        // of the clip made taller climbs cover way more distance than a
+        // single reach should, which read as much too fast.
+        let verticalDistance = abs(target.position.y - startPosition.y)
+        let duration = max(verticalDistance / climbSpeed, 0.01)
+        let t = min(elapsed / duration, 1.0)
+        let newY = simd_mix(startPosition.y, target.position.y, t)
+        let newPosition = SIMD3<Float>(target.position.x, newY, target.position.z)
+        pipo.setPosition(newPosition, relativeTo: nil)
+
+        startClimbClipIfNeeded()
+
+        guard t >= 1.0 else { return }
+
+        if !pathMarkers.isEmpty {
+            pathMarkers.removeFirst().removeFromParent()
+        }
+
+        if target.isVertical {
+            // Still on the wall — keep climbing straight to whatever's next.
+            if !pathQueue.isEmpty {
+                let next = pathQueue.removeFirst()
+                state = .climbing(target: next, startPosition: newPosition, startTime: time)
+                return
+            }
+            climbPlayback?.stop()
+            climbPlayback = nil
+            state = usesClips ? .stoppingWalk : .idle
+            return
+        }
+
+        // Reached the top (a horizontal point) — resume walking toward
+        // whatever's next, or stop here if this was the last point.
+        climbPlayback?.stop()
+        climbPlayback = nil
+        if !pathQueue.isEmpty {
+            let next = pathQueue.removeFirst()
+            state = .walking(target: next)
+            startWalkClipIfNeeded()
+            return
+        }
+        state = usesClips ? .stoppingWalk : .idle
+    }
+
+    private func startClimbClipIfNeeded() {
+        guard let clip = climbClip, let owner = animationOwner else { return }
+        if let playback = climbPlayback, playback.isValid {
+            playback.speed = 1
+            playback.resume()
+        } else {
+            climbPlayback = owner.playAnimation(clip.repeat(),
+                                                transitionDuration: 0.25,
+                                                startsPaused: false)
+        }
     }
 
     // MARK: - Rigged clip playback

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4812E2D24072F30671570668 /* ScreenRecorder.swift */; };
 		13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = DB7D83D29C503B65E76F174D /* Pipo.usdz */; };
+		37A465BE65E498816230F8EB /* ClimbTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 89C415CD2249D6275C98D31C /* ClimbTest.usdz */; };
 		866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030D1E6608E3E43A464A3336 /* ARViewContainer.swift */; };
 		929BC98FA554049C9E143AE3 /* LandTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 24879FDCF1A35F9D18CC7CE3 /* LandTest.usdz */; };
 		ABF973AD58B82E566AB8EB0B /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B36ADF9DB382291B734D1C3 /* Secrets.swift */; };
@@ -29,6 +30,7 @@
 		6259E7E2DDA6889E1029CA3E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6EEA526BF4F634AF3D407FF0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		79929F788216D50FA536CFD4 /* PipoGame.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PipoGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		89C415CD2249D6275C98D31C /* ClimbTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = ClimbTest.usdz; sourceTree = "<group>"; };
 		A380F57777D8DF30632D7FB1 /* PipoAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoAsset.swift; sourceTree = "<group>"; };
 		CC151425FCBC000EA3B6F102 /* WalkTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = WalkTest.usdz; sourceTree = "<group>"; };
 		DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoEntity.swift; sourceTree = "<group>"; };
@@ -40,6 +42,7 @@
 		92564A216B59D6E58AE9CA5A /* Assets */ = {
 			isa = PBXGroup;
 			children = (
+				89C415CD2249D6275C98D31C /* ClimbTest.usdz */,
 				24879FDCF1A35F9D18CC7CE3 /* LandTest.usdz */,
 				DB7D83D29C503B65E76F174D /* Pipo.usdz */,
 				CC151425FCBC000EA3B6F102 /* WalkTest.usdz */,
@@ -140,6 +143,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				37A465BE65E498816230F8EB /* ClimbTest.usdz in Resources */,
 				929BC98FA554049C9E143AE3 /* LandTest.usdz in Resources */,
 				13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */,
 				F6E844D1582E26870BB48D17 /* WalkTest.usdz in Resources */,
