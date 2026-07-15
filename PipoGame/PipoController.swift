@@ -268,10 +268,10 @@ final class PipoController: ObservableObject {
         }
     }
 
-    /// Pinch-to-scale, clamped to 0.2x–10x of Pipo's natural size.
+    /// Pinch-to-scale, clamped to 0.2x–500x of Pipo's natural size.
     func pinch(by factor: Float) {
         guard let pipo else { return }
-        let scaled = min(max(pipo.scale.x * factor, baseScale * 0.2), baseScale * 10)
+        let scaled = min(max(pipo.scale.x * factor, baseScale * 0.2), baseScale * 500)
         pipo.scale = SIMD3<Float>(repeating: scaled)
     }
 
@@ -333,8 +333,12 @@ final class PipoController: ObservableObject {
         let toCamera = arView.cameraTransform.translation - position
         pipo.orientation = simd_quatf(angle: atan2(toCamera.x, toCamera.z), axis: [0, 1, 0])
 
-        let finalScale = pipo.scale
-        baseScale = finalScale.x
+        // Starting size is 10x Pipo's natural scale; baseScale stays at the
+        // natural (un-multiplied) reference so scaleFactor/pinch clamping
+        // continue to mean "relative to his actual natural size."
+        let naturalScale = pipo.scale
+        baseScale = naturalScale.x
+        let finalScale = naturalScale * 10
         pipo.scale = finalScale * 0.01
         anchor.addChild(pipo)
         arView.scene.addAnchor(anchor)

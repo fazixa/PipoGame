@@ -25,8 +25,7 @@ struct ContentView: View {
                         Button {
                             controller.toggleSit()
                         } label: {
-                            Label(controller.isSitting ? "Stand" : "Sit",
-                                  systemImage: controller.isSitting ? "figure.stand" : "chair")
+                            Image(systemName: controller.isSitting ? "figure.stand" : "chair")
                                 .frame(maxWidth: .infinity)
                         }
                         .disabled(!controller.isPlaced || !controller.supportsSit || controller.isDrawingPath)
@@ -35,8 +34,7 @@ struct ContentView: View {
                         Button {
                             controller.toggleDrawPath()
                         } label: {
-                            Label(controller.isDrawingPath ? "Go" : "Draw Path",
-                                  systemImage: controller.isDrawingPath ? "checkmark.circle.fill" : "scribble")
+                            Image(systemName: controller.isDrawingPath ? "checkmark.circle.fill" : "scribble")
                                 .frame(maxWidth: .infinity)
                         }
                         .disabled(!controller.isPlaced || controller.isSitting)
@@ -45,7 +43,6 @@ struct ContentView: View {
                             startRecording()
                         } label: {
                             Image(systemName: "record.circle.fill")
-                                .font(.title2)
                                 .foregroundStyle(.red)
                                 .frame(maxWidth: .infinity)
                         }
@@ -53,7 +50,7 @@ struct ContentView: View {
                         Button(role: .destructive) {
                             controller.reset()
                         } label: {
-                            Label("Reset", systemImage: "arrow.counterclockwise")
+                            Image(systemName: "arrow.counterclockwise")
                                 .frame(maxWidth: .infinity)
                         }
                         .disabled(!controller.isPlaced)
