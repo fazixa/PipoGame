@@ -123,7 +123,11 @@ final class PipoController: ObservableObject {
     /// sinking in a bit — small upward bias on top of the precise
     /// correction to compensate. Tune directly if he's still in/above the
     /// surface.
-    private var pelvisHeightBias: Float { characterHeight * 0.03 }
+    private var pelvisHeightBias: Float { characterHeight * 0.04 }
+    /// Same idea horizontally: nudges him slightly further out over the
+    /// drop (along the sit facing) so his butt sits right at the lip
+    /// instead of a touch behind it. Tune directly if he's over/short.
+    private var pelvisForwardBias: Float { characterHeight * 0.04 }
     /// DEBUG: visualizes findDanglingEdge's search — small dots at every
     /// probed sample point, colored by outcome, plus the winning edge.
     /// Cleared and rebuilt on each search.
@@ -610,6 +614,12 @@ final class PipoController: ObservableObject {
 
         var position = pipo.position(relativeTo: nil)
         position.y -= (hipsWorldBefore.y - targetY) - pelvisHeightBias
+        // Forward bias goes along his current facing, which at this point
+        // IS the edge's outward direction — the arrival handler snapped him
+        // to it before sitting began.
+        let facing = pipo.orientation(relativeTo: nil).act(SIMD3<Float>(0, 0, 1))
+        position.x += facing.x * pelvisForwardBias
+        position.z += facing.z * pelvisForwardBias
         pipo.setPosition(position, relativeTo: nil)
 
         // DEBUG: cyan = where the Hips joint ends up AFTER correcting —
@@ -904,7 +914,7 @@ final class PipoController: ObservableObject {
         // instead of clearing it and hanging in open air. Also protects
         // against small height noise in the LiDAR mesh being misread as an
         // edge, which was causing the search to stop almost immediately.
-        let minimumDropDepth = characterHeight
+        let minimumDropDepth = characterHeight * 0.4
         // A rise taller than this is an obstacle, not a step Pipo could
         // actually walk up — searching wasn't checking for this, so a
         // direction that walked up onto something raised (e.g. climbing
