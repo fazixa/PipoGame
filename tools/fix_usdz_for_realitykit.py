@@ -251,6 +251,19 @@ def main(src, dst):
             w.Set(Vt.FloatArray([tr[f] for tr in tracks]), float(start + f))
         print(f"authored {len(tokens)} blend shape weight tracks")
 
+    # --- toon hull taper weight: the outline shader (Shaders.metal) scales
+    # its push and ink opacity by geometry().color().r, fed from the
+    # displayColor primvar. Blender declares the primvar but leaves it
+    # unauthored, so the shader would read undefined values. This model has
+    # no taper regions (eyes/mouth are separate decal meshes, not merged
+    # GeomSubsets), so author full weight everywhere.
+    from pxr import UsdGeom
+    for mesh in find_prims(stage, "Mesh"):
+        nverts = len(UsdGeom.Mesh(mesh).GetPointsAttr().Get())
+        pv = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(
+            "displayColor", Sdf.ValueTypeNames.Color3fArray, UsdGeom.Tokens.vertex)
+        pv.Set(Vt.Vec3fArray([Gf.Vec3f(1, 1, 1)] * nverts))
+
     fixed = os.path.join(tmpdir, "fixed.usdc")
     layer.Export(fixed)
     if not UsdUtils.CreateNewUsdzPackage(fixed, dst):

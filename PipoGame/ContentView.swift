@@ -49,6 +49,14 @@ struct ContentView: View {
                         .disabled(!controller.isPlaced || controller.isDrawingPath)
 
                         Button {
+                            controller.toggleToon()
+                        } label: {
+                            Image(systemName: controller.isToon ? "paintbrush.fill" : "paintbrush")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(!controller.isPlaced || !controller.supportsToon)
+
+                        Button {
                             startRecording()
                         } label: {
                             Image(systemName: "record.circle.fill")

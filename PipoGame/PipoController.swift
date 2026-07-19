@@ -59,6 +59,10 @@ final class PipoController: ObservableObject {
     /// is shown, and dragging one of its arms moves him along that axis,
     /// independent of any detected surface.
     @Published var isFreehand = false
+    /// Toon look: flat unlit color + inverted-hull outline (see ToonStyle).
+    @Published var isToon = false
+    /// Toon needs the rigged Pipo (the outline shell mirrors its joints).
+    @Published var supportsToon = false
 
     /// Set by ContentView; used to stop recording without on-screen UI.
     var onLongPress: (() -> Void)?
@@ -74,6 +78,15 @@ final class PipoController: ObservableObject {
     // and scale — no manual per-frame syncing needed.
     private var gizmoRoot: Entity?
     private var gizmoArms: [ModelEntity] = []
+
+    // Toon look. The outline shell is a clone of Pipo whose pose is synced
+    // by copying the body's live jointTransforms every frame in update() —
+    // no playback mirroring, so it stays locked to the body across
+    // walk/sit/land clips, crossfades, and freezes alike. (Main's original
+    // implementation mirrored playback controllers instead; with multiple
+    // clips from separate USDZs, joint copying is simpler and drift-free.)
+    private let toonStyle = ToonStyle()
+    private var outlineMeshEntity: ModelEntity?
     private var freehandDragAxis: SIMD3<Float>?
     private var freehandDragStartPosition: SIMD3<Float> = .zero
     private var freehandDragScreenDirection: CGVector = .zero
@@ -123,11 +136,11 @@ final class PipoController: ObservableObject {
     /// sinking in a bit — small upward bias on top of the precise
     /// correction to compensate. Tune directly if he's still in/above the
     /// surface.
-    private var pelvisHeightBias: Float { characterHeight * 0.04 }
+    private var pelvisHeightBias: Float { characterHeight * 0.11 }
     /// Same idea horizontally: nudges him slightly further out over the
     /// drop (along the sit facing) so his butt sits right at the lip
     /// instead of a touch behind it. Tune directly if he's over/short.
-    private var pelvisForwardBias: Float { characterHeight * 0.04 }
+    private var pelvisForwardBias: Float { characterHeight * 0.11 }
     /// DEBUG: visualizes findDanglingEdge's search — small dots at every
     /// probed sample point, colored by outcome, plus the winning edge.
     /// Cleared and rebuilt on each search.
@@ -248,6 +261,26 @@ final class PipoController: ObservableObject {
 
     /// Enters/exits freehand mode (only from .idle/.sitting, same
     /// restriction as drag/rotate). Shows/hides the 3-axis gizmo.
+    func toggleToon() {
+        guard let pipo, supportsToon else { return }
+        if isToon {
+            toonStyle.remove()
+            outlineMeshEntity = nil
+            isToon = false
+            return
+        }
+        // The freehand gizmo lives as a child of pipo — detach it while the
+        // style clones him so its arms don't get swept into the outline
+        // shell / flat-color material swap.
+        let gizmo = gizmoRoot
+        gizmo?.removeFromParent()
+        let clone = toonStyle.apply(to: pipo)
+        if let gizmo { pipo.addChild(gizmo) }
+        guard let clone else { return }
+        outlineMeshEntity = firstMeshEntity(in: clone)
+        isToon = true
+    }
+
     func toggleFreehand() {
         guard isPlaced, !isDrawingPath else { return }
         if isFreehand {
@@ -484,6 +517,10 @@ final class PipoController: ObservableObject {
         sitClip = nil
         sitPlayback = nil
         sitEntity = nil
+        toonStyle.remove()
+        outlineMeshEntity = nil
+        isToon = false
+        supportsToon = false
         // gizmoRoot is a child of pipo, so it's already gone once pipo is
         // released above — just reset the tracking state here.
         gizmoRoot = nil
@@ -523,9 +560,11 @@ final class PipoController: ObservableObject {
             sitClip = loaded.sitClip
             sitEntity = loaded.sitEntity
             supportsSit = sitClip != nil
+            supportsToon = true
         } else {
             pipo = PipoBuilder.build()
             supportsSit = true
+            supportsToon = false
         }
 
         let anchor = AnchorEntity(world: transform)
@@ -716,6 +755,16 @@ final class PipoController: ObservableObject {
 
         case .climbing(let target, let startPosition, let startTime):
             climb(pipo: pipo, target: target, startPosition: startPosition, startTime: startTime)
+        }
+
+        // Toon: mirror the body's live pose onto the outline shell and
+        // refresh the shaders' camera position for their depth pulls.
+        if isToon, let arView {
+            if let body = meshEntity, let outline = outlineMeshEntity {
+                outline.jointTransforms = body.jointTransforms
+            }
+            toonStyle.updateThickness(cameraWorldPosition: arView.cameraTransform.translation,
+                                      worldScale: pipo.scale.x)
         }
     }
 
