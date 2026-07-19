@@ -3,67 +3,6 @@
 
 using namespace metal;
 
-// Depth bias shared by the outline hull and the face features. The floor is
-// in model units: limb-junction depth gaps are model-space geometry, so the
-// bias must not shrink with viewing distance. The ceiling keeps it from
-// punching through Pipo's thin limbs (~0.3 model units across).
-inline float pipoHullPull(float offset)
-{
-    return clamp(offset * 0.75, 0.12, 0.18);
-}
-
-// Inverted-hull outline: vertices pushed outward along their normals, plus a
-// small pull TOWARD the camera. Where a limb meets the body the depth gap
-// between the two surfaces approaches zero and the hull rim would lose the
-// depth test (interior lines fade at soft angles); the toward-camera bias
-// keeps a band of ink alive along those junctions.
-//
-// The push is additionally scaled by the mesh's baked vertex color (see
-// build_baked_usdz.py's "hullWeight" -> displayColor, sourced from Blender
-// vertex groups named in HULL_TAPER_GROUPS, e.g. "mouth_interior"). Concave
-// regions like the mouth interior now share vertices directly with the
-// surrounding skin (no longer separate mesh entities) — full inflation
-// there tears the hull away from its connected neighbors and pokes it
-// through the skin at their shared boundary. Weight 0 at the seam ramps
-// smoothly to 1 a few rings out, so the hull settles to nothing exactly at
-// the seam instead of cracking.
-//
-// custom_parameter() = (offset in model units, camera position in model space),
-// updated per frame by ToonStyle for constant on-screen thickness.
-[[visible]]
-void pipoOutlineGeometry(realitykit::geometry_parameters params)
-{
-    float4 cp = params.uniforms().custom_parameter();
-    float offset = cp.x;
-    float3 cameraModel = cp.yzw;
-    float3 n = normalize(params.geometry().normal());
-    float taper = params.geometry().color().r;
-    params.geometry().set_model_position_offset(n * offset * taper);
-}
-
-// Eyes/mouth in toon mode: no geometry offset. Eyes/mouth were originally
-// pulled toward the camera to stop the outline hull's inflated shell from
-// surfacing as a halo ring around them — but the outline clone already
-// assigns face slots a fully transparent material (see ToonStyle.apply),
-// which solves that robustly on its own. The pull became actively harmful
-// once eyes/mouth stopped being separate mesh entities and became material
-// slots on the SAME continuous mesh as the skin (GeomSubsets): pulling those
-// vertices forward tears them away from their connected neighbors, pushing
-// e.g. the mouth cavity out past the surrounding face surface.
-[[visible]]
-void pipoFacePullGeometry(realitykit::geometry_parameters params)
-{
-}
-
-// Flat unlit face features — Material.002's dark plum.
-[[visible]]
-void pipoFaceSurface(realitykit::surface_parameters params)
-{
-    half3 c = half3(0.126h, 0.01h, 0.027h);
-    params.surface().set_base_color(c);
-    params.surface().set_emissive_color(c);
-}
-
 // Layered value noise ("clouds" style) — cheap, dependency-free stand-in for
 // Perlin noise. Smooth-interpolated hash lattice, good enough for a subtle
 // surface bump; not true gradient (Perlin) noise, but visually equivalent at
@@ -97,23 +36,85 @@ inline float pipoNoise3(float3 p)
     return mix(nxy0, nxy1, f.z);
 }
 
-// Subtle surface bump: nudges each vertex along its own normal by a cloud-
-// noise value sampled at its model-space position, so the pattern is fixed
-// to the mesh (rides along with blend-shape deformation) rather than
-// swimming in world space.
+// Signed soft-noise displacement along the vertex normal — the shared
+// "Blender displace modifier" all toon-mode surfaces apply, sampled at the
+// model-space position so the pattern is fixed to the mesh (rides along
+// with the pose) rather than swimming in world space. Body, face decals,
+// and the outline hull all evaluate this SAME field with the same
+// parameters, so the hull and decals stay wrapped around the bumped body.
+inline float3 pipoDisplacement(float3 pos, float3 n, float scale, float strength)
+{
+    float noiseValue = pipoNoise3(pos * scale) * 2.0 - 1.0;
+    return n * noiseValue * strength;
+}
+
+// Inverted-hull outline: vertices pushed outward along their normals by the
+// line width, on top of the shared soft-noise displacement (which is NOT
+// scaled by the taper — it must match the body's own displacement exactly).
 //
-// custom_parameter() = (noise scale — bumps per model unit, displacement
-// strength in model units, 0, 0).
+// The push is scaled by the mesh's per-vertex taper weight (displayColor.r,
+// authored by fix_usdz_for_realitykit.py — full white on the current model,
+// weighted by build_baked_usdz.py's HULL_TAPER_GROUPS on the old baked one)
+// so concave taper regions can fade the hull to nothing at a seam.
+//
+// custom_parameter() = (line width in model units, noise scale, noise
+// strength in model units, 0). All static — set once at material creation.
+[[visible]]
+void pipoOutlineGeometry(realitykit::geometry_parameters params)
+{
+    float4 cp = params.uniforms().custom_parameter();
+    float offset = cp.x;
+    float3 pos = params.geometry().model_position();
+    float3 n = normalize(params.geometry().normal());
+    float taper = params.geometry().color().r;
+    params.geometry().set_model_position_offset(n * offset * taper);
+}
+
+// Eyes/mouth in toon mode: no outline push of their own (the outline clone
+// gives face slots a fully transparent material instead — no ink ring), but
+// they DO get the shared soft-noise displacement so they keep hugging the
+// displaced body surface instead of sinking under its bumps.
+//
+// custom_parameter() = (0, noise scale, noise strength, 0).
+[[visible]]
+void pipoFacePullGeometry(realitykit::geometry_parameters params)
+{
+}
+
+// Flat unlit face features — Material.002's dark plum.
+[[visible]]
+void pipoFaceSurface(realitykit::surface_parameters params)
+{
+    half3 c = half3(0.126h, 0.01h, 0.027h);
+    params.surface().set_base_color(c);
+    params.surface().set_emissive_color(c);
+}
+
+// Toon body: flat unlit color taken from the material's own base color
+// tint (set per slot by ToonStyle, preserving each part's original color).
+[[visible]]
+void pipoToonBodySurface(realitykit::surface_parameters params)
+{
+    half3 c = half3(params.material_constants().base_color_tint());
+    params.surface().set_base_color(c);
+    params.surface().set_emissive_color(c);
+}
+
+// Subtle surface bump: nudges each vertex along its own normal by a cloud-
+// noise value sampled at its model-space position. Used as the toon body's
+// displacement — the same field the hull and face decals apply (see
+// pipoDisplacement).
+//
+// custom_parameter() = (0, noise scale — bumps per model unit, displacement
+// strength in model units, 0) — same y/z layout as the other toon shaders.
 [[visible]]
 void pipoNoiseDisplaceGeometry(realitykit::geometry_parameters params)
 {
     float4 cp = params.uniforms().custom_parameter();
-    float scale = cp.x;
-    float strength = cp.y;
     float3 pos = params.geometry().model_position();
     float3 n = normalize(params.geometry().normal());
-    float noiseValue = pipoNoise3(pos * scale) * 2.0 - 1.0;
-    params.geometry().set_model_position_offset(n * noiseValue * strength);
+    params.geometry().set_model_position_offset(
+        pipoDisplacement(pos, n, cp.y, cp.z));
 }
 
 // Height-map bump: nudges each vertex along its own normal by a sample from

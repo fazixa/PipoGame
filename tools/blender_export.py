@@ -84,6 +84,53 @@ for ob in decals:
     assert deform_name in rig.data.bones and rig.data.bones[deform_name].use_deform, \
         f"no deform bone for decal {ob.name} (parent bone {parent_bone})"
 
+    if not ob.vertex_groups:
+        # No painted weights (clip files older than v34.Model): transfer
+        # them from the body's skin right here, at rest pose — for each
+        # base vert, sample the nearest body surface point and blend that
+        # face's corner weights. Rigid head.x weighting is NOT equivalent:
+        # the cheek region under the eyes carries shoulder influence, so a
+        # rigid eye shell gets overtaken by the deforming skin beneath it
+        # in some poses (the left eye visibly occluded mid-walk).
+        body = skinned[0]
+        body_inv = body.matrix_world.inverted()
+        made = {}
+        for v in ob.data.vertices:
+            world = ob.matrix_world @ v.co
+            ok, loc, _, face_i = body.closest_point_on_mesh(body_inv @ world)
+            if not ok:
+                continue
+            poly = body.data.polygons[face_i]
+            acc = {}
+            for vi in poly.vertices:
+                bv = body.data.vertices[vi]
+                w = 1.0 / max((bv.co - loc).length, 1e-6)
+                for g in bv.groups:
+                    gname = body.vertex_groups[g.group].name
+                    acc[gname] = acc.get(gname, 0.0) + g.weight * w
+            top = sorted(acc.items(), key=lambda kv: -kv[1])[:4]
+            total = sum(w for _, w in top) or 1.0
+            for gname, w in top:
+                if gname not in made:
+                    made[gname] = ob.vertex_groups.new(name=gname)
+                made[gname].add([v.index], w / total, "REPLACE")
+        # Mirror counterpart groups must exist for the mirror modifier's
+        # vertex-group flipping to take (shoulder.l -> shoulder.r on the
+        # mirrored eye); a missing counterpart silently keeps the wrong side.
+        existing = {g.name for g in ob.vertex_groups}
+        for gname in sorted(existing):
+            flip = gname[:-2] + ".r" if gname.endswith(".l") \
+                else gname[:-2] + ".l" if gname.endswith(".r") else None
+            if flip and flip not in existing:
+                ob.vertex_groups.new(name=flip)
+        print(f"auto-transferred body weights onto decal {ob.name}")
+
+    # Painted (or just-transferred) weights ride through the evaluated
+    # mesh's deform layer; the mesh's group indices refer to the ORIGINAL
+    # object's vertex_groups order, so those groups must be recreated on
+    # the new object in the same order.
+    painted_groups = [g.name for g in ob.vertex_groups]
+
     dg = bpy.context.evaluated_depsgraph_get()
     ob_eval = ob.evaluated_get(dg)
     me = bpy.data.meshes.new_from_object(ob_eval, preserve_all_data_layers=True,
@@ -93,8 +140,15 @@ for ob in decals:
     bpy.data.objects.remove(ob)
     new_ob = bpy.data.objects.new(name, me)
     scn.collection.objects.link(new_ob)
-    vg = new_ob.vertex_groups.new(name=deform_name)
-    vg.add(range(len(me.vertices)), 1.0, "REPLACE")
+    if painted_groups:
+        for gname in painted_groups:
+            new_ob.vertex_groups.new(name=gname)
+        print(f"converted decal {name}: {len(me.vertices)} verts, "
+              f"painted weights ({', '.join(painted_groups)})")
+    else:
+        vg = new_ob.vertex_groups.new(name=deform_name)
+        vg.add(range(len(me.vertices)), 1.0, "REPLACE")
+        print(f"converted decal {name}: {len(me.vertices)} verts -> 100% {deform_name}")
     mod = new_ob.modifiers.new("Armature", "ARMATURE")
     mod.object = rig
     # Must be a child of the rig object: the USD exporter only authors skel
@@ -102,7 +156,6 @@ for ob in decals:
     new_ob.parent = rig
     new_ob.matrix_parent_inverse = rig.matrix_world.inverted()
     converted.append(new_ob)
-    print(f"converted decal {name}: {len(me.vertices)} verts -> 100% {deform_name}")
 rig.data.pose_position = "POSE"
 bpy.context.view_layer.update()
 

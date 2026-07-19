@@ -10,6 +10,22 @@ struct ContentView: View {
             ARViewContainer(controller: controller)
                 .ignoresSafeArea()
 
+            // Game mode: floating joystick over the lower-left region,
+            // kept clear of the control bar below. Sits UNDER the control
+            // VStack in the ZStack so the buttons stay tappable.
+            if controller.isGameMode && uiVisible {
+                VStack {
+                    Spacer()
+                    HStack {
+                        JoystickOverlay { controller.joystickInput = $0 }
+                            .frame(width: 240, height: 280)
+                        Spacer()
+                    }
+                }
+                .padding(.leading, 8)
+                .padding(.bottom, 140)
+            }
+
             if uiVisible {
                 VStack {
                     Spacer()
@@ -37,7 +53,7 @@ struct ContentView: View {
                             Image(systemName: controller.isDrawingPath ? "checkmark.circle.fill" : "scribble")
                                 .frame(maxWidth: .infinity)
                         }
-                        .disabled(!controller.isPlaced || controller.isSitting || controller.isFreehand)
+                        .disabled(!controller.isPlaced || controller.isSitting || controller.isFreehand || controller.isGameMode)
 
                         // TEMP: freehand-move prototype
                         Button {
@@ -46,7 +62,7 @@ struct ContentView: View {
                             Image(systemName: controller.isFreehand ? "checkmark.circle.fill" : "move.3d")
                                 .frame(maxWidth: .infinity)
                         }
-                        .disabled(!controller.isPlaced || controller.isDrawingPath)
+                        .disabled(!controller.isPlaced || controller.isDrawingPath || controller.isGameMode)
 
                         Button {
                             controller.toggleToon()
@@ -55,6 +71,14 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .disabled(!controller.isPlaced || !controller.supportsToon)
+
+                        Button {
+                            controller.toggleGameMode()
+                        } label: {
+                            Image(systemName: controller.isGameMode ? "gamecontroller.fill" : "gamecontroller")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(!controller.isPlaced || controller.isDrawingPath || controller.isFreehand)
 
                         Button {
                             startRecording()
@@ -120,6 +144,58 @@ struct ContentView: View {
         }
     }
 
+    /// Floating virtual joystick: the base circle appears wherever the
+    /// touch lands inside this view's frame and follows classic virtual-
+    /// gamepad rules — knob clamped to the base radius, normalized vector
+    /// reported on every change, zero on release (which also hides it).
+    private struct JoystickOverlay: View {
+        var onChange: (SIMD2<Float>) -> Void
+        @State private var origin: CGPoint?
+        @State private var knobOffset: CGSize = .zero
+        private let radius: CGFloat = 55
+
+        var body: some View {
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                if let origin {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Circle().strokeBorder(.white.opacity(0.25)))
+                        .frame(width: radius * 2, height: radius * 2)
+                        .position(origin)
+                    Circle()
+                        .fill(.white.opacity(0.65))
+                        .frame(width: 44, height: 44)
+                        .position(x: origin.x + knobOffset.width,
+                                  y: origin.y + knobOffset.height)
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let base = origin ?? value.startLocation
+                        if origin == nil { origin = base }
+                        var dx = value.location.x - base.x
+                        var dy = value.location.y - base.y
+                        let length = sqrt(dx * dx + dy * dy)
+                        if length > radius {
+                            dx *= radius / length
+                            dy *= radius / length
+                        }
+                        knobOffset = CGSize(width: dx, height: dy)
+                        // Screen-up is negative dy; the controller wants +y = up.
+                        onChange(SIMD2<Float>(Float(dx / radius), Float(-dy / radius)))
+                    }
+                    .onEnded { _ in
+                        origin = nil
+                        knobOffset = .zero
+                        onChange(.zero)
+                    }
+            )
+        }
+    }
+
     private var hint: String {
         if !controller.isPlaced {
             return "Tap a surface to place Pipo"
@@ -129,6 +205,9 @@ struct ContentView: View {
         }
         if controller.isFreehand {
             return "Drag the colored arrows to move Pipo in 3D • tap Done"
+        }
+        if controller.isGameMode {
+            return "Touch the lower-left area and drag to drive Pipo"
         }
         if controller.isSitting {
             return "Pipo is sitting — tap Stand first to move him"

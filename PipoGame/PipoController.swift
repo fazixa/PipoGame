@@ -45,6 +45,10 @@ final class PipoController: ObservableObject {
         /// point — see climb() for why). startTime is a snapshot of `time`
         /// when this climb segment began, used to compute progress.
         case climbing(target: PathPoint, startPosition: SIMD3<Float>, startTime: Float)
+        /// Game mode: the on-screen joystick steers him directly. Same
+        /// kinematic grounding/fall physics as .walking — only the source
+        /// of the heading changes.
+        case driving
     }
 
     @Published var isPlaced = false
@@ -59,6 +63,20 @@ final class PipoController: ObservableObject {
     /// is shown, and dragging one of its arms moves him along that axis,
     /// independent of any detected surface.
     @Published var isFreehand = false
+    /// Game mode: a floating on-screen joystick drives Pipo directly,
+    /// camera-relative, through the same kinematic controller as walking
+    /// (grounded footprint sweep, falls, landing clip).
+    @Published var isGameMode = false
+    /// Live joystick vector from the UI overlay — x = screen-right,
+    /// y = screen-up, magnitude 0...1. Deliberately not @Published: it
+    /// changes every drag tick and only update() reads it.
+    var joystickInput: SIMD2<Float> = .zero
+    private let joystickDeadzone: Float = 0.15
+    /// Full stick deflection drives him at this multiple of natural walk
+    /// pace — the walk clip is sped up by the same factor, so feet stay
+    /// planted even in overdrive.
+    private let driveTopSpeedMultiplier: Float = 1.5
+
     /// Toon look: flat unlit color + inverted-hull outline (see ToonStyle).
     @Published var isToon = false
     /// Toon needs the rigged Pipo (the outline shell mirrors its joints).
@@ -239,7 +257,7 @@ final class PipoController: ObservableObject {
         case .idle, .sitting:
             let t = result.worldTransform.columns.3
             pipo.setPosition([t.x, t.y, t.z], relativeTo: nil)
-        case .unplaced, .walking, .stoppingWalk, .falling, .landing, .climbing:
+        case .unplaced, .walking, .stoppingWalk, .falling, .landing, .climbing, .driving:
             break
         }
     }
@@ -252,7 +270,7 @@ final class PipoController: ObservableObject {
         case .idle, .sitting:
             let delta = simd_quatf(angle: -deltaRadians, axis: [0, 1, 0])
             pipo.setOrientation(delta * pipo.orientation(relativeTo: nil), relativeTo: nil)
-        case .unplaced, .walking, .stoppingWalk, .falling, .landing, .climbing:
+        case .unplaced, .walking, .stoppingWalk, .falling, .landing, .climbing, .driving:
             break
         }
     }
@@ -281,6 +299,22 @@ final class PipoController: ObservableObject {
         isToon = true
     }
 
+    /// Enters/exits joystick game mode. Entering while sitting stands him
+    /// up first; exiting mid-drive lets the walk clip freeze naturally.
+    func toggleGameMode() {
+        guard isPlaced, !isDrawingPath, !isFreehand else { return }
+        if isGameMode {
+            isGameMode = false
+            joystickInput = .zero
+            if case .driving = state {
+                state = usesClips ? .stoppingWalk : .idle
+            }
+        } else {
+            if case .sitting = state { toggleSit() }
+            isGameMode = true
+        }
+    }
+
     func toggleFreehand() {
         guard isPlaced, !isDrawingPath else { return }
         if isFreehand {
@@ -291,7 +325,7 @@ final class PipoController: ObservableObject {
             case .idle, .sitting:
                 isFreehand = true
                 createGizmo()
-            case .unplaced, .walking, .stoppingWalk, .falling, .landing, .climbing:
+            case .unplaced, .walking, .stoppingWalk, .falling, .landing, .climbing, .driving:
                 break
             }
         }
@@ -488,8 +522,8 @@ final class PipoController: ObservableObject {
             sitAfterWalkArrival = true
             state = .walking(target: PathPoint(position: edge.position, isVertical: false))
             startWalkClipIfNeeded()
-        case .unplaced, .falling, .landing, .climbing:
-            break // TEMP: can't sit mid-air, mid-landing, or mid-climb
+        case .unplaced, .falling, .landing, .climbing, .driving:
+            break // TEMP: can't sit mid-air, mid-landing, mid-climb, or mid-drive
         }
     }
 
@@ -541,6 +575,8 @@ final class PipoController: ObservableObject {
         isPlaced = false
         isSitting = false
         supportsSit = true
+        isGameMode = false
+        joystickInput = .zero
     }
 
     private func place(at transform: simd_float4x4) {
@@ -723,7 +759,11 @@ final class PipoController: ObservableObject {
             break
 
         case .idle:
-            if !usesClips { animateIdle(pipo: pipo, dt: dt) }
+            if isGameMode, simd_length(joystickInput) > joystickDeadzone {
+                state = .driving
+            } else if !usesClips {
+                animateIdle(pipo: pipo, dt: dt)
+            }
 
         case .walking(let target):
             walk(pipo: pipo, toward: target, dt: dt)
@@ -755,23 +795,23 @@ final class PipoController: ObservableObject {
 
         case .climbing(let target, let startPosition, let startTime):
             climb(pipo: pipo, target: target, startPosition: startPosition, startTime: startTime)
+
+        case .driving:
+            drive(pipo: pipo, dt: dt)
         }
 
-        // Toon: mirror the body's live pose onto the outline shell and
-        // refresh the shaders' camera position for their depth pulls.
-        if isToon, let arView {
-            if let body = meshEntity, let outline = outlineMeshEntity {
-                outline.jointTransforms = body.jointTransforms
-                // Joints and blend shape weights are separate channels: the
-                // knee correctives ride the body's playing clip as
-                // blendShapeWeights, and the shell plays no clips — copy
-                // the live weights across too or its knees stay uncorrected.
-                if let weights = body.components[BlendShapeWeightsComponent.self] {
-                    outline.components.set(weights)
-                }
+        // Toon: mirror the body's live pose onto the outline shell. All
+        // toon materials are static now (no camera-dependent params), so
+        // pose sync is the only per-frame work.
+        if isToon, let body = meshEntity, let outline = outlineMeshEntity {
+            outline.jointTransforms = body.jointTransforms
+            // Joints and blend shape weights are separate channels: the
+            // knee correctives ride the body's playing clip as
+            // blendShapeWeights, and the shell plays no clips — copy
+            // the live weights across too or its knees stay uncorrected.
+            if let weights = body.components[BlendShapeWeightsComponent.self] {
+                outline.components.set(weights)
             }
-            toonStyle.updateThickness(cameraWorldPosition: arView.cameraTransform.translation,
-                                      worldScale: pipo.scale.x)
         }
     }
 
@@ -888,6 +928,73 @@ final class PipoController: ObservableObject {
 
         if usesClips {
             startWalkClipIfNeeded()
+        } else {
+            animateGait(pipo: pipo, dt: dt)
+        }
+    }
+
+    // MARK: - Game mode (joystick drive)
+
+    /// Direct joystick locomotion: camera-relative heading, analog speed,
+    /// and the SAME grounded-footprint sweep + fall trigger walk() uses —
+    /// game mode changes who steers, not the physics.
+    private func drive(pipo: Entity, dt: Float) {
+        let magnitude = simd_length(joystickInput)
+        guard isGameMode, magnitude > joystickDeadzone, let arView else {
+            state = usesClips ? .stoppingWalk : .idle
+            return
+        }
+
+        // Camera-relative frame flattened to XZ: stick-up = away from the
+        // camera, stick-right = screen right.
+        let cam = arView.cameraTransform.matrix
+        var forward = SIMD3<Float>(-cam.columns.2.x, 0, -cam.columns.2.z)
+        if simd_length_squared(forward) < 0.0001 {
+            // Looking straight down — the camera's up axis is the best
+            // remaining hint for "away from me."
+            forward = SIMD3<Float>(cam.columns.1.x, 0, cam.columns.1.z)
+        }
+        forward = simd_normalize(forward)
+        let right = SIMD3<Float>(-forward.z, 0, forward.x)
+        let direction = simd_normalize(right * joystickInput.x + forward * joystickInput.y)
+
+        // Analog: deadzone..full remaps to 0..topSpeed and drives both
+        // ground speed and clip pace, so feet stay planted at any
+        // deflection — including overdrive past natural walk pace.
+        let throttle = min((magnitude - joystickDeadzone) / (1 - joystickDeadzone), 1)
+            * driveTopSpeedMultiplier
+        var position = pipo.position(relativeTo: nil)
+        position += direction * (walkSpeed * throttle * dt)
+
+        if let groundY = groundedHeight(at: position) {
+            position.y = damp(position.y, groundY, rate: 12, dt: dt)
+            pipo.setPosition(position, relativeTo: nil)
+        } else if usesClips, landClip != nil {
+            // Same fall-with-momentum trigger as walk(). The resume target
+            // IS the landing spot, so after the landing clip plays he just
+            // stands there awaiting further stick input.
+            walkPlayback?.stop()
+            walkPlayback = nil
+            let eventualGroundY = groundHeight(at: position) ?? position.y - characterHeight
+            let forwardCarry = direction * (characterHeight * 0.5)
+            let landingPosition = SIMD3<Float>(position.x + forwardCarry.x,
+                                               eventualGroundY,
+                                               position.z + forwardCarry.z)
+            pipo.setPosition(position, relativeTo: nil)
+            state = .falling(resumeTarget: PathPoint(position: landingPosition, isVertical: false),
+                             landingPosition: landingPosition)
+            return
+        } else {
+            pipo.setPosition(position, relativeTo: nil)
+        }
+
+        let desired = simd_quatf(angle: atan2(direction.x, direction.z), axis: [0, 1, 0])
+        let current = pipo.orientation(relativeTo: nil)
+        pipo.setOrientation(simd_slerp(current, desired, smoothing(rate: 10, dt: dt)), relativeTo: nil)
+
+        if usesClips {
+            startWalkClipIfNeeded()
+            walkPlayback?.speed = throttle
         } else {
             animateGait(pipo: pipo, dt: dt)
         }
