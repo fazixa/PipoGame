@@ -67,7 +67,12 @@ void pipoOutlineGeometry(realitykit::geometry_parameters params)
     float3 pos = params.geometry().model_position();
     float3 n = normalize(params.geometry().normal());
     float taper = params.geometry().color().r;
-    params.geometry().set_model_position_offset(n * offset * taper);
+    // Pencil wobble: line weight varies along the stroke, and the noise
+    // phase steps at ~10 fps so the line "boils" like hand-drawn frames.
+    float t = floor(params.uniforms().time() * 10.0) / 10.0;
+    float wobble = pipoNoise3(pos * 18.0 + t * 3.7);
+    float width = offset * mix(0.55, 1.45, wobble);
+    params.geometry().set_model_position_offset(n * width * taper);
 }
 
 // Eyes/mouth in toon mode: no outline push of their own (the outline clone
@@ -160,5 +165,12 @@ void pipoOutlineSurface(realitykit::surface_parameters params)
     params.surface().set_base_color(ink);
     params.surface().set_emissive_color(ink);
     half taper = half(params.geometry().color().r);
-    params.surface().set_opacity(taper);
+    // Pencil grain: high-frequency noise = graphite/paper texture eating
+    // into the stroke, stepping at ~10 fps in lockstep with the width
+    // wobble (same boil clock).
+    float3 pos = params.geometry().model_position();
+    float t = floor(params.uniforms().time() * 10.0) / 10.0;
+    float grain = pipoNoise3(pos * 60.0 + t * 11.0);
+    half pencil = half(mix(0.75, 1.0, grain));
+    params.surface().set_opacity(taper * pencil);
 }
