@@ -31,7 +31,11 @@ final class ToonStyle {
         }
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         tint.getRed(&r, green: &g, blue: &b, alpha: &a)
-        return (0.299 * r + 0.587 * g + 0.114 * b) < 0.25
+        // 0.45, not 0.25: RealityKit reports tints sRGB-encoded, so the
+        // Blender-exported linear face color (dark plum) reads as ~0.28
+        // luminance — the old 0.25 threshold silently missed it (body
+        // pink reads ~0.61, so 0.45 separates them comfortably).
+        return (0.299 * r + 0.587 * g + 0.114 * b) < 0.45
     }
 
     private var swapped: [(Entity, [any RealityKit.Material])] = []
@@ -84,14 +88,25 @@ final class ToonStyle {
         let clone = pipo.clone(recursive: true)
         clone.transform = Transform.identity
         var modelIndex = 0
+        var pureFaceClones: [Entity] = []
         forEachModel(in: clone) { entity, model in
             entity.components.remove(GroundingShadowComponent.self)
             let faceIndices = modelIndex < faceIndicesPerModel.count
                 ? faceIndicesPerModel[modelIndex] : []
             modelIndex += 1
+            // The hull is the BODY only: a model that is nothing but face
+            // slots is an eye/mouth decal mesh — it contributes nothing to
+            // the outline, and its inflated clone would ring the feature.
+            if !faceIndices.isEmpty && faceIndices.count == model.materials.count {
+                pureFaceClones.append(entity)
+                return
+            }
             model.materials = model.materials.enumerated().map { index, _ -> any RealityKit.Material in
                 faceIndices.contains(index) ? invisible : material
             }
+        }
+        for entity in pureFaceClones {
+            entity.removeFromParent()
         }
         pipo.addChild(clone)
         outlineRoot = clone

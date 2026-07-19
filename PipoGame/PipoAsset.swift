@@ -89,7 +89,7 @@ enum PipoAsset {
                 guard let pbr = material as? PhysicallyBasedMaterial else { return material }
                 var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
                 pbr.baseColor.tint.getRed(&r, green: &g, blue: &b, alpha: &a)
-                guard (0.299 * r + 0.587 * g + 0.114 * b) < 0.25 else { return material }
+                guard (0.299 * r + 0.587 * g + 0.114 * b) < 0.45 else { return material }
                 return UnlitMaterial(color: pbr.baseColor.tint)
             }
             entity.components.set(model)

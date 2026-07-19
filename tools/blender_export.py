@@ -187,6 +187,20 @@ for ob in meshes:
             bpy.ops.object.modifier_apply(modifier=mod.name)
             print(f"applied subsurf on {ob.name}: {len(ob.data.vertices)} verts")
 
+    # Cap any open holes: the body has a REAL hole where the mouth is
+    # (covered by the mouth decal), and a hole rim is a silhouette — the
+    # toon outline hull draws a phantom ring around it in every pose. The
+    # cap faces reuse the existing rim verts (so they inherit their skin
+    # weights) and hide behind the mouth decal. No-op on closed meshes.
+    faces_before = len(ob.data.polygons)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.fill_holes(sides=0)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    if len(ob.data.polygons) != faces_before:
+        print(f"capped holes on {ob.name}: "
+              f"{len(ob.data.polygons) - faces_before} faces added")
+
     # smooth normals do more for perceived smoothness than poly count
     bpy.ops.object.shade_smooth()
 
