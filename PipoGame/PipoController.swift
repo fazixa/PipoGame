@@ -762,6 +762,13 @@ final class PipoController: ObservableObject {
         if isToon, let arView {
             if let body = meshEntity, let outline = outlineMeshEntity {
                 outline.jointTransforms = body.jointTransforms
+                // Joints and blend shape weights are separate channels: the
+                // knee correctives ride the body's playing clip as
+                // blendShapeWeights, and the shell plays no clips — copy
+                // the live weights across too or its knees stay uncorrected.
+                if let weights = body.components[BlendShapeWeightsComponent.self] {
+                    outline.components.set(weights)
+                }
             }
             toonStyle.updateThickness(cameraWorldPosition: arView.cameraTransform.translation,
                                       worldScale: pipo.scale.x)
