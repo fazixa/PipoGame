@@ -43,45 +43,60 @@ enum PipoAsset {
     }
 
     static func load() -> LoadedPipo? {
-        // TEMP: loading WalkTest.usdz (Mixamo rig prototype) instead of Pipo
-        // to sanity-check the joint-skeleton export pipeline on this clean,
-        // pre-regression branch. Revert to "Pipo" / worldScale afterward.
-        guard let root = try? Entity.load(named: "WalkTest") else { return nil }
-        root.scale = SIMD3<Float>(repeating: 0.015)
+        // Real Pipo: ARP rig exported to a deform-only joint skeleton
+        // (tools/blender_export.py + fix_usdz_for_realitykit.py) with the
+        // walk cycle baked onto the joints and knee-corrective blend shapes
+        // riding along. Land/climb/sit clips were authored on the Mixamo
+        // test skeleton and can't play on this rig — they stay nil until
+        // re-authored on Pipo's rig; the controller falls back gracefully
+        // (glide-climb, no land clip, sit disabled via supportsSit).
+        guard let root = try? Entity.load(named: "Pipo") else { return nil }
+        root.scale = SIMD3<Float>(repeating: worldScale)
 
         applyGroundingShadow(root)
+        flattenFaceSlots(root)
 
         guard let owner = firstEntityWithAnimations(in: root),
               let clip = owner.availableAnimations.first else {
             return nil
         }
 
-        // TEMP: LandTest.usdz is loaded to pull its AnimationResource out —
-        // its own entity hierarchy is never added to the scene, but IS kept
-        // alive via LoadedPipo.landEntity (see its doc comment for why).
-        // Same skeleton/joint names as WalkTest, so the clip plays fine on
-        // the walk entity directly.
-        let landEntity = try? Entity.load(named: "LandTest")
-        print("DEBUG landEntity loaded:", landEntity != nil)
-        let landOwner = landEntity.flatMap(firstEntityWithAnimations)
-        print("DEBUG landOwner found:", landOwner != nil,
-              "availableAnimations:", landOwner?.availableAnimations.count ?? -1)
-        let landClip = landOwner?.availableAnimations.first
-        print("DEBUG landClip extracted:", landClip != nil,
-              "duration:", landClip?.definition.duration ?? -1)
-
-        // TEMP: same loading pattern as landClip — ClimbTest.usdz shares the
-        // WalkTest skeleton, so its clip plays directly on the walk entity.
-        let climbEntity = try? Entity.load(named: "ClimbTest")
-        let climbClip = climbEntity.flatMap(firstEntityWithAnimations)?.availableAnimations.first
-
-        let sitEntity = try? Entity.load(named: "SittingTest")
+        // PipoSit.usdz / PipoLand.usdz: clips exported off the same rig
+        // (v32 sit loop, v31 land one-shot), so they play directly on the
+        // walk entity's skeleton. Loaded to pull the AnimationResource out;
+        // their entity hierarchies are never added to the scene but must
+        // stay retained (sitEntity/landEntity) or the clip silently dies
+        // on a second load.
+        let sitEntity = try? Entity.load(named: "PipoSit")
         let sitClip = sitEntity.flatMap(firstEntityWithAnimations)?.availableAnimations.first
+
+        let landEntity = try? Entity.load(named: "PipoLand")
+        let landClip = landEntity.flatMap(firstEntityWithAnimations)?.availableAnimations.first
 
         return LoadedPipo(root: root, animationOwner: owner, walkClip: clip,
                           landClip: landClip, landEntity: landEntity,
-                          climbClip: climbClip, climbEntity: climbEntity,
+                          climbClip: nil, climbEntity: nil,
                           sitClip: sitClip, sitEntity: sitEntity)
+    }
+
+    /// Eyes/mouth (identified by their dark near-black tint) read as flat
+    /// unlit color rather than catching PBR specular/shadowing — small,
+    /// near-black features where PBR shading mostly just adds noise
+    /// instead of readable shape.
+    private static func flattenFaceSlots(_ entity: Entity) {
+        if var model = entity.components[ModelComponent.self] {
+            model.materials = model.materials.map { material in
+                guard let pbr = material as? PhysicallyBasedMaterial else { return material }
+                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+                pbr.baseColor.tint.getRed(&r, green: &g, blue: &b, alpha: &a)
+                guard (0.299 * r + 0.587 * g + 0.114 * b) < 0.25 else { return material }
+                return UnlitMaterial(color: pbr.baseColor.tint)
+            }
+            entity.components.set(model)
+        }
+        for child in entity.children {
+            flattenFaceSlots(child)
+        }
     }
 
     private static func firstEntityWithAnimations(in entity: Entity) -> Entity? {

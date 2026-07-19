@@ -126,6 +126,40 @@ def main(src, dst):
         leaf_bone = [sanitized[j.split("/")[-1]] for j in old_joints]
     except KeyError as e:
         sys.exit(f"joint leaf {e} not found among Blender bones")
+
+    # Blender's only_deform_bones still exports every ANCESTOR of a deform
+    # bone as a real joint, so control bones ride along (129 joints for 66
+    # deform bones on the ARP rig). The app iterates jointTransforms — the
+    # pose-reactive footprint, and procedural animation later — so phantom
+    # control joints aren't just dead weight, they're wrong data. Strip to
+    # true deform bones and remap every mesh's jointIndices (skeleton-order
+    # indices; none of these meshes author a per-mesh skel:joints list).
+    keep_mask = [bones[n].get("deform", True) for n in leaf_bone]
+    if not all(keep_mask):
+        remap, kept = {}, []
+        for i, (n, k) in enumerate(zip(leaf_bone, keep_mask)):
+            if k:
+                remap[i] = len(kept)
+                kept.append(n)
+        for mesh in find_prims(stage, "Mesh"):
+            b = UsdSkel.BindingAPI(mesh)
+            pv = b.GetJointIndicesPrimvar()
+            if not pv or b.GetJointsAttr().Get() is not None:
+                continue
+            wts = b.GetJointWeightsPrimvar().Get()
+            new_idx = []
+            for j, w in zip(pv.Get(), wts):
+                if j in remap:
+                    new_idx.append(remap[j])
+                elif w == 0.0:
+                    new_idx.append(0)
+                else:
+                    sys.exit(f"{mesh.GetPath()} weights control bone "
+                             f"{leaf_bone[j]!r} (w={w})")
+            pv.Set(Vt.IntArray(new_idx))
+        print(f"stripped {len(leaf_bone) - len(kept)} control joints, "
+              f"{len(kept)} deform joints kept")
+        leaf_bone = kept
     joint_set = set(leaf_bone)
 
     def deform_parent(name):
@@ -190,6 +224,32 @@ def main(src, dst):
     changed = sum(1 for a, b in zip(old_joints, newpaths) if a != b)
     print(f"rebuilt skeleton: {changed}/{len(newpaths)} paths changed, "
           f"{end - start + 1} frames re-authored")
+
+    # --- blend shape weights from sidecar ground truth. The shape keys are
+    # driver-driven in Blender (knee correctives), and the USD exporter does
+    # not sample drivers — the exported weights are static garbage.
+    blendshapes = data.get("blendshapes") or {}
+    if blendshapes:
+        mesh_tokens = set()
+        for mesh in find_prims(stage, "Mesh"):
+            toks = UsdSkel.BindingAPI(mesh).GetBlendShapesAttr().Get()
+            mesh_tokens.update(toks or [])
+        tokens, tracks = [], []
+        for mesh_name, keys in blendshapes.items():
+            for kname, vals in keys.items():
+                tok = "".join(c if c.isalnum() else "_" for c in kname)
+                if tok not in mesh_tokens:
+                    sys.exit(f"shape key {kname!r} -> token {tok!r} not bound "
+                             f"on any mesh (bound: {sorted(mesh_tokens)})")
+                tokens.append(tok)
+                tracks.append(vals)
+        anim_api.GetBlendShapesAttr().Set(Vt.TokenArray(tokens))
+        w = anim_api.GetBlendShapeWeightsAttr()
+        for t in layer.ListTimeSamplesForPath(w.GetPath()):
+            layer.EraseTimeSample(w.GetPath(), t)
+        for f in range(end - start + 1):
+            w.Set(Vt.FloatArray([tr[f] for tr in tracks]), float(start + f))
+        print(f"authored {len(tokens)} blend shape weight tracks")
 
     fixed = os.path.join(tmpdir, "fixed.usdc")
     layer.Export(fixed)

@@ -191,16 +191,13 @@ final class PipoController: ObservableObject {
         guard let pipo, baseScale > 0 else { return 1 }
         return pipo.scale.x / baseScale
     }
-    // TEMP: replaces the Pipo-tuned 0.16 for WalkTest.usdz (Mixamo,
-    // exported "in place" with no baked root motion). The clip's own
-    // stance-phase kinematics (both feet's ground-contact windows, cross-
-    // checked two ways) imply ~1.15 m/s at the model's NATURAL/raw size —
-    // but PipoAsset.load() renders WalkTest at 0.015x scale, and walkSpeed
-    // is applied at that already-scaled size (scaleFactor normalizes to 1.0
-    // at placement scale, not true 1:1), so the constant needs that same
-    // 0.015 factor folded in: 1.15 * 0.015 ≈ 0.0173.
-    // Revert to 0.16 when swapping back to Pipo.
-    private var walkSpeed: Float { (usesClips ? 0.0173 : 0.22) * scaleFactor }  // m/s
+    // Tuned for Pipo's walk (v30, Mixamo-retargeted): clean flat stance —
+    // the planted foot sweeps back at a CONSTANT 2.88 m/s at the model's
+    // raw ~4.6 m size, so that IS the slide-free ground speed. PipoAsset
+    // renders at 0.034x, and walkSpeed applies at that already-scaled size
+    // (scaleFactor normalizes to 1.0 at placement scale), so fold it in:
+    // 2.88 * 0.034 ≈ 0.098.
+    private var walkSpeed: Float { (usesClips ? 0.098 : 0.22) * scaleFactor }  // m/s
     private let stepRate: Float = 11                          // procedural gait, rad/s
     // TEMP: climb prototype — fallback lerp speed if no climb clip loaded.
     private var climbSpeed: Float { walkSpeed * 0.5 }
@@ -598,8 +595,11 @@ final class PipoController: ObservableObject {
         // ":" to "_" in joint names ("mixamorig:Hips" -> "mixamorig_Hips"),
         // so an exact-name lookup for the original Mixamo name silently
         // never matched, meaning this whole function was a no-op.
+        // "root_x" is the pelvis on Pipo's ARP rig (Blender "root.x").
         guard let meshEntity, let targetY = pendingSitTargetY,
-              let hipsIndex = meshEntity.jointNames.firstIndex(where: { $0.hasSuffix("Hips") }) else {
+              let hipsIndex = meshEntity.jointNames.firstIndex(where: {
+                  $0.hasSuffix("Hips") || $0.hasSuffix("root_x")
+              }) else {
             pendingSitTargetY = nil
             return
         }

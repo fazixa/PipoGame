@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00770859618EDA10E56BBEA6 /* PipoLand.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 63350C6694D9230FAF14A108 /* PipoLand.usdz */; };
 		0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4812E2D24072F30671570668 /* ScreenRecorder.swift */; };
 		13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = DB7D83D29C503B65E76F174D /* Pipo.usdz */; };
 		1FA51DF1609E6B446ED57D2F /* SittingTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = E85E8FC2431191B921D1004B /* SittingTest.usdz */; };
@@ -14,6 +15,7 @@
 		866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030D1E6608E3E43A464A3336 /* ARViewContainer.swift */; };
 		929BC98FA554049C9E143AE3 /* LandTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 24879FDCF1A35F9D18CC7CE3 /* LandTest.usdz */; };
 		ABF973AD58B82E566AB8EB0B /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B36ADF9DB382291B734D1C3 /* Secrets.swift */; };
+		D4F0FEB98EC4CFE75F3068D1 /* PipoSit.usdz in Resources */ = {isa = PBXBuildFile; fileRef = AC9AB72A45FB4D6ACAA5DC54 /* PipoSit.usdz */; };
 		D554773950E13F128CB326FA /* PipoAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A380F57777D8DF30632D7FB1 /* PipoAsset.swift */; };
 		D6735C8120071C3614BEFC0D /* PipoGameApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3597C6801AA242234D6077A /* PipoGameApp.swift */; };
 		D6BC045CBDF1801AF8E903F7 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEA526BF4F634AF3D407FF0 /* ContentView.swift */; };
@@ -29,10 +31,12 @@
 		4812E2D24072F30671570668 /* ScreenRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecorder.swift; sourceTree = "<group>"; };
 		4B36ADF9DB382291B734D1C3 /* Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Secrets.swift; sourceTree = "<group>"; };
 		6259E7E2DDA6889E1029CA3E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		63350C6694D9230FAF14A108 /* PipoLand.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = PipoLand.usdz; sourceTree = "<group>"; };
 		6EEA526BF4F634AF3D407FF0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		79929F788216D50FA536CFD4 /* PipoGame.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PipoGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		89C415CD2249D6275C98D31C /* ClimbTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = ClimbTest.usdz; sourceTree = "<group>"; };
 		A380F57777D8DF30632D7FB1 /* PipoAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoAsset.swift; sourceTree = "<group>"; };
+		AC9AB72A45FB4D6ACAA5DC54 /* PipoSit.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = PipoSit.usdz; sourceTree = "<group>"; };
 		CC151425FCBC000EA3B6F102 /* WalkTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = WalkTest.usdz; sourceTree = "<group>"; };
 		DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoEntity.swift; sourceTree = "<group>"; };
 		DB7D83D29C503B65E76F174D /* Pipo.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = Pipo.usdz; sourceTree = "<group>"; };
@@ -47,6 +51,8 @@
 				89C415CD2249D6275C98D31C /* ClimbTest.usdz */,
 				24879FDCF1A35F9D18CC7CE3 /* LandTest.usdz */,
 				DB7D83D29C503B65E76F174D /* Pipo.usdz */,
+				63350C6694D9230FAF14A108 /* PipoLand.usdz */,
+				AC9AB72A45FB4D6ACAA5DC54 /* PipoSit.usdz */,
 				E85E8FC2431191B921D1004B /* SittingTest.usdz */,
 				CC151425FCBC000EA3B6F102 /* WalkTest.usdz */,
 			);
@@ -149,6 +155,8 @@
 				37A465BE65E498816230F8EB /* ClimbTest.usdz in Resources */,
 				929BC98FA554049C9E143AE3 /* LandTest.usdz in Resources */,
 				13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */,
+				00770859618EDA10E56BBEA6 /* PipoLand.usdz in Resources */,
+				D4F0FEB98EC4CFE75F3068D1 /* PipoSit.usdz in Resources */,
 				1FA51DF1609E6B446ED57D2F /* SittingTest.usdz in Resources */,
 				F6E844D1582E26870BB48D17 /* WalkTest.usdz in Resources */,
 			);
