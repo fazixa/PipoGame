@@ -131,9 +131,12 @@ final class ToonStyle {
               let library = device.makeDefaultLibrary() else { return nil }
         do {
             let surface = CustomMaterial.SurfaceShader(named: "pipoToonBodySurface", in: library)
+            let geometry = CustomMaterial.GeometryModifier(named: "pipoToonBodyGeometry", in: library)
             var material = try CustomMaterial(surfaceShader: surface,
+                                              geometryModifier: geometry,
                                               lightingModel: .unlit)
             material.baseColor = .init(tint: tint)
+            material.custom.value = SIMD4<Float>(lineWidth, 0, 0, 0)
             return material
         } catch {
             print("toon body material creation failed: \(error)")

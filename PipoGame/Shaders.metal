@@ -75,15 +75,16 @@ void pipoOutlineGeometry(realitykit::geometry_parameters params)
     params.geometry().set_model_position_offset(n * width * taper);
 }
 
-// Eyes/mouth in toon mode: no outline push of their own (the outline clone
-// gives face slots a fully transparent material instead — no ink ring), but
-// they DO get the shared soft-noise displacement so they keep hugging the
-// displaced body surface instead of sinking under its bumps.
-//
-// custom_parameter() = (0, noise scale, noise strength, 0).
+// Eyes/mouth in toon mode: lifted off the skin so the body's wobble
+// displacement (up to ~0.45 x line width outward) can never rise through
+// them. A uniform TRANSLATION along face-forward (-Y in model space), not
+// a push along vertex normals — normals inflate the patch (every vertex
+// moves apart, the feature reads bigger); a translation preserves the
+// silhouette exactly and just floats the sticker forward.
 [[visible]]
 void pipoFacePullGeometry(realitykit::geometry_parameters params)
 {
+    params.geometry().set_model_position_offset(float3(0.0, -0.02, 0.0));
 }
 
 // Flat unlit face features — Material.002's dark plum.
@@ -93,6 +94,23 @@ void pipoFaceSurface(realitykit::surface_parameters params)
     half3 c = half3(0.126h, 0.01h, 0.027h);
     params.surface().set_base_color(c);
     params.surface().set_emissive_color(c);
+}
+
+// Toon body displacement: the SAME signed wobble field the outline hull's
+// width uses (same noise, same 10 fps boil clock), minus the constant line
+// offset — the body surface boils in lockstep with the outline, so the
+// contour wanders like a hand-drawn edge.
+// custom_parameter() = (line width in model units, 0, 0, 0).
+[[visible]]
+void pipoToonBodyGeometry(realitykit::geometry_parameters params)
+{
+    float offset = params.uniforms().custom_parameter().x;
+    float3 pos = params.geometry().model_position();
+    float3 n = normalize(params.geometry().normal());
+    float t = floor(params.uniforms().time() * 10.0) / 10.0;
+    float wobble = pipoNoise3(pos * 18.0 + t * 3.7);
+    params.geometry().set_model_position_offset(
+        n * offset * (mix(0.55, 1.45, wobble) - 1.0));
 }
 
 // Toon body: flat unlit color taken from the material's own base color
