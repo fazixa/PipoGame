@@ -171,6 +171,9 @@ void pipoOutlineSurface(realitykit::surface_parameters params)
     float3 pos = params.geometry().model_position();
     float t = floor(params.uniforms().time() * 10.0) / 10.0;
     float grain = pipoNoise3(pos * 60.0 + t * 11.0);
-    half pencil = half(mix(0.75, 1.0, grain));
+    // Binary grain: each speck is fully inked or fully clear (no gray
+    // in-between) — reads as paper tooth. Threshold sets coverage:
+    // ~15% of the stroke drops out.
+    half pencil = half(step(0.15, grain));
     params.surface().set_opacity(taper * pencil);
 }
