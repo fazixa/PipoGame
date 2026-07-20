@@ -179,7 +179,7 @@ void pipoHeightMapDisplaceGeometry(realitykit::geometry_parameters params)
 [[visible]]
 void pipoOutlineSurface(realitykit::surface_parameters params)
 {
-    half3 ink = half3(0.36h, 0.015h, 0.12h);
+    half3 ink = half3(0.24h, 0.008h, 0.075h);
     params.surface().set_base_color(ink);
     params.surface().set_emissive_color(ink);
     half taper = half(params.geometry().color().r);
