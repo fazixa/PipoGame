@@ -112,7 +112,10 @@ final class PipoController: ObservableObject {
         /// Index of this leg's knee-corrective track in the body's
         /// BlendShapeWeightsComponent (Kneebend_l / kneebend_r).
         let kneebendWeightIndex: Int?
-        var smoothedDrop: Float = 0
+        /// Signed world-space ground offset under this foot, smoothed:
+        /// negative = ground lower (stretch down), positive = higher (IK
+        /// bend up onto it).
+        var smoothedDelta: Float = 0
     }
     private var legChains: [LegChain] = []
     private var jointParents: [Int] = []
@@ -120,10 +123,14 @@ final class PipoController: ObservableObject {
     /// as planted (the stance foot rides near the clip's ground plane; the
     /// swing foot lifts well above it).
     private let footPlantHeightFraction: Float = 0.08
-    /// Ground must be at least this much lower before stretching (noise gate).
-    private let footDipDeadzone: Float = 0.015
+    /// Ground offset below which the solver stays out entirely — must
+    /// comfortably exceed LiDAR height noise or idle legs twitch.
+    private let footDipDeadzone: Float = 0.03
     /// Longest the noodle leg is allowed to stretch.
     private let footMaxStretchFraction: Float = 0.35
+    /// Tallest local rise a foot will plant on via the IK bend; anything
+    /// taller is an obstacle, not a step.
+    private let footMaxRiseFraction: Float = 0.25
     /// DEBUG: small markers at each foot's ground target while stretching.
     private let footGroundingDebug = true
     private var footDebugAnchors: [AnchorEntity] = []
@@ -1423,64 +1430,124 @@ final class PipoController: ObservableObject {
         guard usesClips, let meshEntity, !legChains.isEmpty,
               meshEntity.jointTransforms.count == jointParents.count else { return }
 
-        // Locomotion states only — sitting/falling/climbing/landing feet are
-        // SUPPOSED to leave the ground, and the ledge-sit approach glide
-        // deliberately overhangs the drop.
+        // GAME MODE only, locomotion states only. In the main view the pass
+        // fought drag-repositioning — lifting Pipo onto a table left his
+        // planted feet stretching down to the floor mid-drag. Sitting/
+        // falling/climbing/landing feet are SUPPOSED to leave the ground.
         var active: Bool
         switch state {
-        case .idle, .walking, .stoppingWalk, .driving: active = !sitAfterWalkArrival
-        default: active = false
+        case .idle, .walking, .stoppingWalk, .driving:
+            active = isGameMode && !sitAfterWalkArrival
+        default:
+            active = false
         }
 
         var transforms = meshEntity.jointTransforms
         let pipoY = pipo.position(relativeTo: nil).y
-        // World-units-per-model-unit and world-down expressed in model space,
+        // World-units-per-model-unit and world-up expressed in model space,
         // resolved through the entity hierarchy so scale/rotation are exact.
         let originWorld = meshEntity.convert(position: .zero, to: nil)
         let worldPerModel = simd_length(
             meshEntity.convert(position: SIMD3<Float>(0, 0, 1), to: nil) - originWorld)
         guard worldPerModel > 0 else { return }
-        let modelDown = simd_normalize(
-            meshEntity.convert(direction: SIMD3<Float>(0, -1, 0), from: nil))
+        let modelUp = simd_normalize(
+            meshEntity.convert(direction: SIMD3<Float>(0, 1, 0), from: nil))
 
         var wroteAny = false
         for ci in legChains.indices {
-            var targetDrop: Float = 0
+            var targetDelta: Float = 0
             if active {
-                let model = jointModelMatrices(transforms)
-                let footModel = SIMD3<Float>(model[legChains[ci].foot].columns.3.x,
-                                             model[legChains[ci].foot].columns.3.y,
-                                             model[legChains[ci].foot].columns.3.z)
+                // hip/knee/foot are root-level joints in the compacted
+                // skeleton — their local translations ARE skeleton-space
+                // positions, no matrix accumulation needed.
+                let footModel = transforms[legChains[ci].foot].translation
                 let footWorld = meshEntity.convert(position: footModel, to: nil)
                 let planted = (footWorld.y - pipoY) < characterHeight * footPlantHeightFraction
                 if planted, let groundY = meshGroundHeight(at: footWorld) {
-                    let dip = pipoY - groundY
-                    if dip > characterHeight * footDipDeadzone {
-                        targetDrop = min(dip, characterHeight * footMaxStretchFraction)
+                    let delta = groundY - pipoY
+                    if abs(delta) > characterHeight * footDipDeadzone {
+                        targetDelta = min(max(delta, -characterHeight * footMaxStretchFraction),
+                                          characterHeight * footMaxRiseFraction)
                     }
                 }
-                updateFootDebugMarker(ci, at: footWorld, dropTo: footWorld.y - targetDrop,
-                                      stretching: targetDrop > 0)
+                updateFootDebugMarker(ci, at: footWorld, dropTo: footWorld.y + targetDelta,
+                                      stretching: targetDelta != 0)
             } else {
                 updateFootDebugMarker(ci, at: .zero, dropTo: 0, stretching: false)
             }
 
-            legChains[ci].smoothedDrop = damp(legChains[ci].smoothedDrop, targetDrop,
-                                              rate: 14, dt: dt)
-            let drop = legChains[ci].smoothedDrop
-            guard drop > 0.001 else { continue }
-
-            // Rubber-hose stretch: knee comes down half the drop, foot the
-            // full drop — thigh and shin elongate evenly through skinning.
-            let dropModel = modelDown * (drop / worldPerModel)
-            transforms[legChains[ci].knee].translation += dropModel * 0.5
-            transforms[legChains[ci].foot].translation += dropModel
+            legChains[ci].smoothedDelta = damp(legChains[ci].smoothedDelta, targetDelta,
+                                               rate: 14, dt: dt)
+            let delta = legChains[ci].smoothedDelta
+            guard abs(delta) > 0.001 else { continue }
+            solveLeg(&transforms, chain: legChains[ci],
+                     ankleShift: modelUp * (delta / worldPerModel))
             wroteAny = true
         }
         if wroteAny {
             meshEntity.jointTransforms = transforms
             updateKneebendWeights(transforms)
         }
+    }
+
+    /// Unified per-leg solve, all in skeleton space. The ankle target is
+    /// the animated ankle shifted to the real local ground. Within reach:
+    /// standard 2-bone IK — knee placed by the law of cosines in the
+    /// pose's own bend plane (so it folds the way the animation was
+    /// already folding), thigh and shin rotated to aim at the solved
+    /// knee/ankle. Beyond reach (ground lower than a straight leg):
+    /// rubber-hose stretch — the segments elongate proportionally along
+    /// the straight hip-to-target line, per the rig's stretch design.
+    private func solveLeg(_ transforms: inout [Transform], chain: LegChain,
+                          ankleShift: SIMD3<Float>) {
+        let hip = transforms[chain.hip].translation
+        let kneeA = transforms[chain.knee].translation
+        let ankleA = transforms[chain.foot].translation
+        let l1 = simd_length(kneeA - hip)
+        let l2 = simd_length(ankleA - kneeA)
+        guard l1 > 0.0001, l2 > 0.0001 else { return }
+
+        let target = ankleA + ankleShift
+        var d = simd_length(target - hip)
+        guard d > 0.0001 else { return }
+        let dirT = (target - hip) / d
+
+        var knee: SIMD3<Float>
+        if d >= l1 + l2 {
+            // out of reach: straight noodle, elongated proportionally
+            knee = hip + dirT * (d * l1 / (l1 + l2))
+        } else {
+            // Bend plane: trust the animated knee's offset from the
+            // hip->target line ONLY when it's a meaningful fraction of the
+            // leg length — on a near-straight leg that offset is millimeter
+            // noise pointing anywhere (it read "inward" at rest and swung
+            // the thigh sideways). Otherwise fold character-forward (-Y in
+            // the z-up skeleton space), the way his knees always fold.
+            var bend = (kneeA - hip) - dirT * simd_dot(kneeA - hip, dirT)
+            if simd_length(bend) < 0.05 * (l1 + l2) {
+                let forward = SIMD3<Float>(0, -1, 0)
+                bend = forward - dirT * simd_dot(forward, dirT)
+            }
+            guard simd_length(bend) > 0.0001 else { return }
+            bend = simd_normalize(bend)
+            d = max(d, abs(l1 - l2) + 0.0001)
+            let cosA = min(max((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1), 1)
+            let sinA = sqrt(max(1 - cosA * cosA, 0))
+            knee = hip + dirT * (l1 * cosA) + bend * (l1 * sinA)
+        }
+
+        // aim the segments at their solved endpoints, on top of the
+        // animated orientations (twist/roll preserved)
+        func aim(_ index: Int, from a: SIMD3<Float>, to b: SIMD3<Float>) {
+            let la = simd_length(a), lb = simd_length(b)
+            guard la > 0.0001, lb > 0.0001 else { return }
+            let q = simd_quatf(from: a / la, to: b / lb)
+            transforms[index].rotation = q * transforms[index].rotation
+        }
+        aim(chain.hip, from: kneeA - hip, to: knee - hip)
+        aim(chain.knee, from: ankleA - kneeA, to: target - knee)
+        transforms[chain.knee].translation = knee
+        transforms[chain.foot].translation = target
     }
 
     /// Stretching straightens the knee, but the clip's baked Kneebend
@@ -1494,7 +1561,7 @@ final class PipoController: ObservableObject {
               var data = component.weightSet.first else { return }
         var weights = Array(data.weights)
         var changed = false
-        for chain in legChains where chain.smoothedDrop > 0.001 {
+        for chain in legChains where abs(chain.smoothedDelta) > 0.001 {
             guard let wi = chain.kneebendWeightIndex, wi < weights.count else { continue }
             let hip = transforms[chain.hip].translation
             let knee = transforms[chain.knee].translation
