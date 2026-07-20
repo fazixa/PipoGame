@@ -97,6 +97,37 @@ final class PipoController: ObservableObject {
     private var gizmoRoot: Entity?
     private var gizmoArms: [ModelEntity] = []
 
+    // MARK: - Foot grounding (rubber-hose stretch-down, IK step 1)
+    // Post-animation pass: a planted foot whose real ground (LiDAR mesh) is
+    // LOWER than the animation assumed gets stretched down to touch it —
+    // per Fae's rig design, low ground = stretch the noodle leg (translate
+    // foot + knee joints; skinning elongates the leg), high ground = 2-bone
+    // IK (step 2, not built yet). Runs on whatever pose the clips produced,
+    // so it works identically for walk/idle/drive and future generated
+    // motion.
+    private struct LegChain {
+        let foot: Int   // foot joint (root-level after control-bone strip)
+        let knee: Int   // leg_stretch = shin bone origin (the knee)
+        let hip: Int    // thigh_stretch = thigh bone origin (the hip)
+        /// Index of this leg's knee-corrective track in the body's
+        /// BlendShapeWeightsComponent (Kneebend_l / kneebend_r).
+        let kneebendWeightIndex: Int?
+        var smoothedDrop: Float = 0
+    }
+    private var legChains: [LegChain] = []
+    private var jointParents: [Int] = []
+    /// Animated foot height above Pipo's origin below which the foot counts
+    /// as planted (the stance foot rides near the clip's ground plane; the
+    /// swing foot lifts well above it).
+    private let footPlantHeightFraction: Float = 0.08
+    /// Ground must be at least this much lower before stretching (noise gate).
+    private let footDipDeadzone: Float = 0.015
+    /// Longest the noodle leg is allowed to stretch.
+    private let footMaxStretchFraction: Float = 0.35
+    /// DEBUG: small markers at each foot's ground target while stretching.
+    private let footGroundingDebug = true
+    private var footDebugAnchors: [AnchorEntity] = []
+
     // Toon look. The outline shell is a clone of Pipo whose pose is synced
     // by copying the body's live jointTransforms every frame in update() —
     // no playback mirroring, so it stays locked to the body across
@@ -562,6 +593,10 @@ final class PipoController: ObservableObject {
         isFreehand = false
         meshEntity = nil
         footprintOffsets = []
+        legChains = []
+        jointParents = []
+        for anchor in footDebugAnchors { anchor.removeFromParent() }
+        footDebugAnchors = []
         sitAfterWalkArrival = false
         pendingSitFacing = nil
         pendingSitTargetY = nil
@@ -633,6 +668,7 @@ final class PipoController: ObservableObject {
 
         meshEntity = firstMeshEntity(in: pipo)
         refreshFootprint()
+        setupFootGrounding()
     }
 
     /// Rebuilds the footprint used by groundedHeight's sweep from the mesh
@@ -799,6 +835,10 @@ final class PipoController: ObservableObject {
         case .driving:
             drive(pipo: pipo, dt: dt)
         }
+
+        // Post-animation foot grounding — must run BEFORE the toon mirror
+        // so the outline shell copies the adapted pose.
+        applyFootGrounding(pipo: pipo, dt: dt)
 
         // Toon: mirror the body's live pose onto the outline shell. All
         // toon materials are static now (no camera-dependent params), so
@@ -1336,6 +1376,162 @@ final class PipoController: ObservableObject {
         let sorted = supportedHits.sorted()
         let mid = sorted.count / 2
         return sorted.count % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+    }
+
+    private func setupFootGrounding() {
+        legChains = []
+        jointParents = []
+        guard let meshEntity else { return }
+        let names = meshEntity.jointNames
+        var indexOf: [String: Int] = [:]
+        for (i, name) in names.enumerated() { indexOf[name] = i }
+        // Parent = the joint whose path is this path minus its last segment.
+        // Joint order is topological (USD requirement), so parents always
+        // precede children.
+        jointParents = names.map { path in
+            guard let cut = path.lastIndex(of: "/") else { return -1 }
+            return indexOf[String(path[..<cut])] ?? -1
+        }
+        let weightNames = meshEntity.components[BlendShapeWeightsComponent.self]?
+            .weightSet.first?.weightNames ?? []
+        for side in ["l", "r"] {
+            guard let foot = names.firstIndex(where: { $0.hasSuffix("foot_\(side)") }),
+                  let knee = names.firstIndex(where: { $0.hasSuffix("leg_stretch_\(side)") }),
+                  let hip = names.firstIndex(where: { $0.hasSuffix("thigh_stretch_\(side)") })
+            else { continue }
+            let weightIndex = weightNames.firstIndex {
+                $0.lowercased().hasSuffix("kneebend_\(side)")
+            }
+            legChains.append(LegChain(foot: foot, knee: knee, hip: hip,
+                                      kneebendWeightIndex: weightIndex))
+        }
+    }
+
+    /// Joint transforms accumulated to skeleton/model space.
+    private func jointModelMatrices(_ transforms: [Transform]) -> [float4x4] {
+        var model = [float4x4](repeating: matrix_identity_float4x4,
+                               count: transforms.count)
+        for i in 0..<transforms.count {
+            let local = transforms[i].matrix
+            let parent = jointParents[i]
+            model[i] = parent >= 0 ? model[parent] * local : local
+        }
+        return model
+    }
+
+    private func applyFootGrounding(pipo: Entity, dt: Float) {
+        guard usesClips, let meshEntity, !legChains.isEmpty,
+              meshEntity.jointTransforms.count == jointParents.count else { return }
+
+        // Locomotion states only — sitting/falling/climbing/landing feet are
+        // SUPPOSED to leave the ground, and the ledge-sit approach glide
+        // deliberately overhangs the drop.
+        var active: Bool
+        switch state {
+        case .idle, .walking, .stoppingWalk, .driving: active = !sitAfterWalkArrival
+        default: active = false
+        }
+
+        var transforms = meshEntity.jointTransforms
+        let pipoY = pipo.position(relativeTo: nil).y
+        // World-units-per-model-unit and world-down expressed in model space,
+        // resolved through the entity hierarchy so scale/rotation are exact.
+        let originWorld = meshEntity.convert(position: .zero, to: nil)
+        let worldPerModel = simd_length(
+            meshEntity.convert(position: SIMD3<Float>(0, 0, 1), to: nil) - originWorld)
+        guard worldPerModel > 0 else { return }
+        let modelDown = simd_normalize(
+            meshEntity.convert(direction: SIMD3<Float>(0, -1, 0), from: nil))
+
+        var wroteAny = false
+        for ci in legChains.indices {
+            var targetDrop: Float = 0
+            if active {
+                let model = jointModelMatrices(transforms)
+                let footModel = SIMD3<Float>(model[legChains[ci].foot].columns.3.x,
+                                             model[legChains[ci].foot].columns.3.y,
+                                             model[legChains[ci].foot].columns.3.z)
+                let footWorld = meshEntity.convert(position: footModel, to: nil)
+                let planted = (footWorld.y - pipoY) < characterHeight * footPlantHeightFraction
+                if planted, let groundY = meshGroundHeight(at: footWorld) {
+                    let dip = pipoY - groundY
+                    if dip > characterHeight * footDipDeadzone {
+                        targetDrop = min(dip, characterHeight * footMaxStretchFraction)
+                    }
+                }
+                updateFootDebugMarker(ci, at: footWorld, dropTo: footWorld.y - targetDrop,
+                                      stretching: targetDrop > 0)
+            } else {
+                updateFootDebugMarker(ci, at: .zero, dropTo: 0, stretching: false)
+            }
+
+            legChains[ci].smoothedDrop = damp(legChains[ci].smoothedDrop, targetDrop,
+                                              rate: 14, dt: dt)
+            let drop = legChains[ci].smoothedDrop
+            guard drop > 0.001 else { continue }
+
+            // Rubber-hose stretch: knee comes down half the drop, foot the
+            // full drop — thigh and shin elongate evenly through skinning.
+            let dropModel = modelDown * (drop / worldPerModel)
+            transforms[legChains[ci].knee].translation += dropModel * 0.5
+            transforms[legChains[ci].foot].translation += dropModel
+            wroteAny = true
+        }
+        if wroteAny {
+            meshEntity.jointTransforms = transforms
+            updateKneebendWeights(transforms)
+        }
+    }
+
+    /// Stretching straightens the knee, but the clip's baked Kneebend
+    /// weight still says "bent" — recompute it from the ACTUAL post-stretch
+    /// geometry using the rig's own driver mapping (weight = knee flex
+    /// angle in radians, identity curve, clamped 0...1 — read from the
+    /// Blender driver on key_blocks["Kneebend.*"].value).
+    private func updateKneebendWeights(_ transforms: [Transform]) {
+        guard let meshEntity,
+              var component = meshEntity.components[BlendShapeWeightsComponent.self],
+              var data = component.weightSet.first else { return }
+        var weights = Array(data.weights)
+        var changed = false
+        for chain in legChains where chain.smoothedDrop > 0.001 {
+            guard let wi = chain.kneebendWeightIndex, wi < weights.count else { continue }
+            let hip = transforms[chain.hip].translation
+            let knee = transforms[chain.knee].translation
+            let ankle = transforms[chain.foot].translation
+            let thigh = simd_normalize(knee - hip)
+            let shin = simd_normalize(ankle - knee)
+            let bend = acos(min(max(simd_dot(thigh, shin), -1), 1))
+            weights[wi] = min(max(bend, 0), 1)
+            changed = true
+        }
+        if changed {
+            data.weights = BlendShapeWeights(weights)
+            component.weightSet[0] = data
+            meshEntity.components.set(component)
+        }
+    }
+
+    private func updateFootDebugMarker(_ index: Int, at footWorld: SIMD3<Float>,
+                                       dropTo targetY: Float, stretching: Bool) {
+        guard footGroundingDebug, let arView else { return }
+        while footDebugAnchors.count <= index {
+            var material = UnlitMaterial(color: .systemGreen)
+            material.readsDepth = false
+            material.writesDepth = false
+            let marker = ModelEntity(mesh: .generateSphere(radius: 0.003),
+                                     materials: [material])
+            let anchor = AnchorEntity(world: .zero)
+            anchor.addChild(marker)
+            arView.scene.addAnchor(anchor)
+            footDebugAnchors.append(anchor)
+        }
+        let anchor = footDebugAnchors[index]
+        anchor.isEnabled = stretching
+        if stretching {
+            anchor.setPosition(SIMD3<Float>(footWorld.x, targetY, footWorld.z),
+                               relativeTo: nil)
+        }
     }
 
     // MARK: - Fall/landing prototype
