@@ -874,7 +874,9 @@ final class PipoController: ObservableObject {
         let direction = heading / distance
 
         let step = min(walkSpeed * dt, distance)
-        position += direction * step
+        position += resolveHorizontalCollision(position: position,
+                                                displacement: direction * step,
+                                                target: target)
 
         if sitAfterWalkArrival {
             // This walk is a deliberate approach to a ledge already
@@ -964,7 +966,8 @@ final class PipoController: ObservableObject {
         let throttle = min((magnitude - joystickDeadzone) / (1 - joystickDeadzone), 1)
             * driveTopSpeedMultiplier
         var position = pipo.position(relativeTo: nil)
-        position += direction * (walkSpeed * throttle * dt)
+        position += resolveHorizontalCollision(position: position,
+                                               displacement: direction * (walkSpeed * throttle * dt))
 
         if let groundY = groundedHeight(at: position) {
             position.y = damp(position.y, groundY, rate: 12, dt: dt)
@@ -998,6 +1001,68 @@ final class PipoController: ObservableObject {
         } else {
             animateGait(pipo: pipo, dt: dt)
         }
+    }
+
+    // MARK: - Wall collision (kinematic probe + slide)
+
+    /// Games-style lateral collision: probe the LiDAR mesh along the
+    /// intended horizontal displacement at two body heights, using the
+    /// pose-reactive footprint's extent along the motion direction as his
+    /// radius. Blocked motion clamps at the wall (minus a skin margin) and
+    /// the remainder slides along the wall plane — one re-probe on the
+    /// slide direction, same as a CharacterController's collide-and-slide.
+    /// Vertical (climbable) walk targets are exempt: the climb flow is
+    /// SUPPOSED to reach the wall base.
+    private func resolveHorizontalCollision(position: SIMD3<Float>,
+                                            displacement: SIMD3<Float>,
+                                            target: PathPoint? = nil) -> SIMD3<Float> {
+        if let target, target.isVertical { return displacement }
+        let horizontal = SIMD3<Float>(displacement.x, 0, displacement.z)
+        var remaining = simd_length(horizontal)
+        guard remaining > 1e-6 else { return displacement }
+        var dir = horizontal / remaining
+        var moved = SIMD3<Float>.zero
+
+        for _ in 0..<2 {
+            let dxz = SIMD2<Float>(dir.x, dir.z)
+            let extent = footprintOffsets.map { simd_dot($0, dxz) }.max() ?? 0
+            let radius = max(extent, characterHeight * 0.08) + characterHeight * 0.04
+
+            var wall: (allowed: Float, normal: SIMD3<Float>)?
+            for heightFraction: Float in [0.25, 0.6] {
+                let origin = position + moved
+                    + SIMD3<Float>(0, characterHeight * heightFraction, 0)
+                guard let hit = meshRaycastHit(from: origin,
+                                               to: origin + dir * (remaining + radius))
+                else { continue }
+                var normal = SIMD3<Float>(hit.normal.x, 0, hit.normal.z)
+                let steepness = simd_length(normal)
+                // mostly-horizontal normal = a wall; gentle slopes are the
+                // ground system's business
+                guard steepness > 0.6 else { continue }
+                normal /= steepness
+                if simd_dot(normal, dir) > 0 { normal = -normal }
+                let allowed = simd_distance(origin, hit.position) - radius
+                if wall == nil || allowed < wall!.allowed {
+                    wall = (allowed, normal)
+                }
+            }
+
+            guard let wall, wall.allowed < remaining else {
+                moved += dir * remaining
+                break
+            }
+            let step = max(wall.allowed, 0)
+            moved += dir * step
+            let leftover = remaining - step
+            var slide = dir - wall.normal * simd_dot(dir, wall.normal)
+            let slideLength = simd_length(slide)
+            guard slideLength > 1e-4, leftover > 1e-6 else { break }
+            slide /= slideLength
+            dir = slide
+            remaining = leftover * slideLength
+        }
+        return SIMD3<Float>(moved.x, displacement.y, moved.z)
     }
 
     private func groundHeight(at position: SIMD3<Float>) -> Float? {
