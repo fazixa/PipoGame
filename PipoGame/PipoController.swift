@@ -112,10 +112,20 @@ final class PipoController: ObservableObject {
         /// Index of this leg's knee-corrective track in the body's
         /// BlendShapeWeightsComponent (Kneebend_l / kneebend_r).
         let kneebendWeightIndex: Int?
-        /// Signed world-space ground offset under this foot, smoothed:
-        /// negative = ground lower (stretch down), positive = higher (IK
-        /// bend up onto it).
-        var smoothedDelta: Float = 0
+        /// World-space point this foot is latched to while planted —
+        /// captured at the plant instant (ground-corrected), held through
+        /// the stance so the foot cannot slide, released at lift-off.
+        var lockedTarget: SIMD3<Float>?
+        /// Smoothed world-space shift from the animated foot to its
+        /// target; eases the lock in and out.
+        var smoothedShift: SIMD3<Float> = .zero
+        /// Rolling min/max of this foot's animated height — the plant and
+        /// release thresholds adapt to the CURRENT clip's actual foot
+        /// motion range instead of fixed fractions of character height
+        /// (fixed thresholds sat above the walk's whole swing arc and the
+        /// lock dragged the foot through the swing).
+        var heightMin: Float = .greatestFiniteMagnitude
+        var heightMax: Float = -.greatestFiniteMagnitude
     }
     private var legChains: [LegChain] = []
     private var jointParents: [Int] = []
@@ -126,8 +136,12 @@ final class PipoController: ObservableObject {
     /// Ground offset below which the solver stays out entirely — must
     /// comfortably exceed LiDAR height noise or idle legs twitch.
     private let footDipDeadzone: Float = 0.03
-    /// Longest the noodle leg is allowed to stretch.
-    private let footMaxStretchFraction: Float = 0.35
+    /// Longest the noodle leg is allowed to stretch: EXACTLY the grounded
+    /// tolerance, so the leg can never reach ground the fall system
+    /// considers unsupported — previously stretch (0.35h) exceeded the
+    /// fall trigger (0.2h) and drops in that band showed a planted
+    /// stretched foot while the fall/land sequence played anyway.
+    private var footMaxStretch: Float { groundedTolerance }
     /// Tallest local rise a foot will plant on via the IK bend; anything
     /// taller is an obstacle, not a step.
     private let footMaxRiseFraction: Float = 0.25
@@ -214,6 +228,10 @@ final class PipoController: ObservableObject {
     private var usesClips: Bool { walkClip != nil }
 
     // TEMP: fall/landing prototype
+    /// Y at the moment the fall triggered — at impact, falls shorter than
+    /// landClipMinimumDrop skip the land clip (a hop, not a crash).
+    private var fallStartY: Float = 0
+    private var landClipMinimumDrop: Float { characterHeight * 0.5 }
     private var landClip: AnimationResource?
     private var landClipDuration: TimeInterval = 1
     private var landPlayback: AnimationPlaybackController?
@@ -962,6 +980,7 @@ final class PipoController: ObservableObject {
                                                 eventualGroundY,
                                                 position.z + forwardCarry.z)
             pipo.setPosition(position, relativeTo: nil)
+            fallStartY = position.y
             print("PIPOFALLDBG trigger: from=\(position) landingPosition=\(landingPosition) landClip=\(landClip != nil) owner=\(animationOwner != nil)")
             state = .falling(resumeTarget: target, landingPosition: landingPosition)
             return
@@ -1028,6 +1047,7 @@ final class PipoController: ObservableObject {
                                                eventualGroundY,
                                                position.z + forwardCarry.z)
             pipo.setPosition(position, relativeTo: nil)
+            fallStartY = position.y
             state = .falling(resumeTarget: PathPoint(position: landingPosition, isVertical: false),
                              landingPosition: landingPosition)
             return
@@ -1453,35 +1473,79 @@ final class PipoController: ObservableObject {
         let modelUp = simd_normalize(
             meshEntity.convert(direction: SIMD3<Float>(0, 1, 0), from: nil))
 
+        _ = modelUp; _ = worldPerModel  // conversions below go through convert(position:)
+
         var wroteAny = false
         for ci in legChains.indices {
-            var targetDelta: Float = 0
-            if active {
-                // hip/knee/foot are root-level joints in the compacted
-                // skeleton — their local translations ARE skeleton-space
-                // positions, no matrix accumulation needed.
-                let footModel = transforms[legChains[ci].foot].translation
-                let footWorld = meshEntity.convert(position: footModel, to: nil)
-                let planted = (footWorld.y - pipoY) < characterHeight * footPlantHeightFraction
-                if planted, let groundY = meshGroundHeight(at: footWorld) {
-                    let delta = groundY - pipoY
-                    if abs(delta) > characterHeight * footDipDeadzone {
-                        targetDelta = min(max(delta, -characterHeight * footMaxStretchFraction),
-                                          characterHeight * footMaxRiseFraction)
-                    }
-                }
-                updateFootDebugMarker(ci, at: footWorld, dropTo: footWorld.y + targetDelta,
-                                      stretching: targetDelta != 0)
-            } else {
+            // hip/knee/foot are root-level joints in the compacted
+            // skeleton — their local translations ARE skeleton-space
+            // positions, no matrix accumulation needed.
+            let footModel = transforms[legChains[ci].foot].translation
+            let footWorld = meshEntity.convert(position: footModel, to: nil)
+
+            if !active {
+                legChains[ci].lockedTarget = nil
+                legChains[ci].smoothedShift = .zero
+                legChains[ci].heightMin = .greatestFiniteMagnitude
+                legChains[ci].heightMax = -.greatestFiniteMagnitude
                 updateFootDebugMarker(ci, at: .zero, dropTo: 0, stretching: false)
+                continue
             }
 
-            legChains[ci].smoothedDelta = damp(legChains[ci].smoothedDelta, targetDelta,
-                                               rate: 14, dt: dt)
-            let delta = legChains[ci].smoothedDelta
-            guard abs(delta) > 0.001 else { continue }
+            // ── per-foot plant/lift state machine ──
+            // Thresholds adapt to the clip: rolling min/max of the foot's
+            // animated height (slowly relaxing, so a clip change
+            // recalibrates within a second). Plant = bottom 25% of the
+            // foot's own motion range, release = above 45%.
+            let height = footWorld.y - pipoY
+            let relax = characterHeight * 0.5 * dt
+            legChains[ci].heightMin = min(height, legChains[ci].heightMin + relax)
+            legChains[ci].heightMax = max(height, legChains[ci].heightMax - relax)
+            let range = max(legChains[ci].heightMax - legChains[ci].heightMin,
+                            characterHeight * 0.02)
+            let plantHeight = legChains[ci].heightMin + range * 0.25
+            let releaseHeight = legChains[ci].heightMin + range * 0.45
+            var targetShift = SIMD3<Float>.zero
+            if let lock = legChains[ci].lockedTarget {
+                // Release on lift-off or when the animation has carried the
+                // body too far from the latched point.
+                let drift = simd_length(SIMD2<Float>(footWorld.x - lock.x,
+                                                     footWorld.z - lock.z))
+                if height > releaseHeight || drift > characterHeight * 0.3 {
+                    legChains[ci].lockedTarget = nil
+                } else {
+                    targetShift = lock - footWorld
+                }
+            } else if height < plantHeight,
+                      let groundY = meshGroundHeight(at: footWorld) {
+                // Plant instant: latch ONLY when the local ground actually
+                // differs from the walking plane — on flat ground the
+                // matched clip pace already keeps the stance foot
+                // world-stationary, and locking there just interferes with
+                // the authored motion (the walk read as sticky/dragged).
+                // One raycast per stance — the lock is stable against
+                // per-frame mesh noise.
+                let rawDelta = groundY - pipoY
+                if abs(rawDelta) > characterHeight * footDipDeadzone {
+                    let delta = min(max(rawDelta, -footMaxStretch),
+                                    characterHeight * footMaxRiseFraction)
+                    let lock = SIMD3<Float>(footWorld.x, footWorld.y + delta, footWorld.z)
+                    legChains[ci].lockedTarget = lock
+                    targetShift = lock - footWorld
+                }
+            }
+            updateFootDebugMarker(ci, at: footWorld,
+                                  dropTo: legChains[ci].lockedTarget?.y ?? footWorld.y,
+                                  stretching: legChains[ci].lockedTarget != nil)
+
+            // ── ease the lock in/out, solve if meaningful ──
+            let blend = smoothing(rate: 18, dt: dt)
+            legChains[ci].smoothedShift += (targetShift - legChains[ci].smoothedShift) * blend
+            let shift = legChains[ci].smoothedShift
+            guard simd_length(shift) > 0.001 else { continue }
+            let targetModel = meshEntity.convert(position: footWorld + shift, from: nil)
             solveLeg(&transforms, chain: legChains[ci],
-                     ankleShift: modelUp * (delta / worldPerModel))
+                     ankleShift: targetModel - footModel)
             wroteAny = true
         }
         if wroteAny {
@@ -1561,7 +1625,7 @@ final class PipoController: ObservableObject {
               var data = component.weightSet.first else { return }
         var weights = Array(data.weights)
         var changed = false
-        for chain in legChains where abs(chain.smoothedDelta) > 0.001 {
+        for chain in legChains where simd_length(chain.smoothedShift) > 0.001 {
             guard let wi = chain.kneebendWeightIndex, wi < weights.count else { continue }
             let hip = transforms[chain.hip].translation
             let knee = transforms[chain.knee].translation
@@ -1618,6 +1682,13 @@ final class PipoController: ObservableObject {
             position.z = landingPosition.z
             pipo.setPosition(position, relativeTo: nil)
             fallVelocity = 0
+            // Short falls read as steps, not crashes — skip the impact
+            // clip and go straight back to walking.
+            if fallStartY - landingPosition.y < landClipMinimumDrop {
+                state = .walking(target: resumeTarget)
+                startWalkClipIfNeeded()
+                return
+            }
             // Play the impact animation fresh, right at the moment of
             // landing — landPlayback is untouched before this point (no
             // pre-created paused controller to stop first), since stopping
