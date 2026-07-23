@@ -34,11 +34,21 @@ argv = sys.argv[sys.argv.index("--") + 1:]
 ACTION_NAME, OUT = argv[0], argv[1]
 FRAME_RANGE = (int(argv[2]), int(argv[3])) if len(argv) >= 4 else None
 
-RIG_NAME = "rig"
 PIPO_PINK = (0.8000395, 0.16891873, 0.43402848)
 
 scn = bpy.context.scene
-rig = bpy.data.objects[RIG_NAME]
+# Old Pipo rig files name the armature object "rig"; the new (mixamorig
+# chain) rig files use Blender's default "Armature" — try the known name
+# first, then fall back to the only armature in the file if unambiguous,
+# rather than hardcoding one or the other.
+rig = bpy.data.objects.get("rig") or bpy.data.objects.get("Armature")
+if rig is None:
+    armatures = [ob for ob in bpy.data.objects if ob.type == "ARMATURE"]
+    assert len(armatures) == 1, \
+        f"no object named 'rig' or 'Armature', and {len(armatures)} armatures present " \
+        f"(need exactly 1 to auto-detect): {[a.name for a in armatures]}"
+    rig = armatures[0]
+print(f"using rig object {rig.name!r}")
 
 # Files saved mid-animation open in Pose (or Edit) mode, where object-mode
 # operators fail their poll. Force object mode before doing anything.
