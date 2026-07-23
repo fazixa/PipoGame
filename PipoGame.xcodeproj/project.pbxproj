@@ -13,6 +13,7 @@
 		1FA51DF1609E6B446ED57D2F /* SittingTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = E85E8FC2431191B921D1004B /* SittingTest.usdz */; };
 		32989C1684D53131F4FF8280 /* ToonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */; };
 		37A465BE65E498816230F8EB /* ClimbTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 89C415CD2249D6275C98D31C /* ClimbTest.usdz */; };
+		811C106E7FA919537B7F7F9B /* PipoLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095878509CE2611DA26928EB /* PipoLog.swift */; };
 		866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030D1E6608E3E43A464A3336 /* ARViewContainer.swift */; };
 		929BC98FA554049C9E143AE3 /* LandTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 24879FDCF1A35F9D18CC7CE3 /* LandTest.usdz */; };
 		991C06BF13433666BC5AC29C /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5B9A036E4DACE0CE732B0DBF /* Shaders.metal */; };
@@ -28,6 +29,7 @@
 
 /* Begin PBXFileReference section */
 		030D1E6608E3E43A464A3336 /* ARViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARViewContainer.swift; sourceTree = "<group>"; };
+		095878509CE2611DA26928EB /* PipoLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoLog.swift; sourceTree = "<group>"; };
 		137F4E6E2FB64259EFA56AA9 /* PipoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoController.swift; sourceTree = "<group>"; };
 		24879FDCF1A35F9D18CC7CE3 /* LandTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = LandTest.usdz; sourceTree = "<group>"; };
 		4812E2D24072F30671570668 /* ScreenRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecorder.swift; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 				137F4E6E2FB64259EFA56AA9 /* PipoController.swift */,
 				DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */,
 				E3597C6801AA242234D6077A /* PipoGameApp.swift */,
+				095878509CE2611DA26928EB /* PipoLog.swift */,
 				4812E2D24072F30671570668 /* ScreenRecorder.swift */,
 				4B36ADF9DB382291B734D1C3 /* Secrets.swift */,
 				5B9A036E4DACE0CE732B0DBF /* Shaders.metal */,
@@ -181,6 +184,7 @@
 				F9E10DF5C3C2CD9371F1C1FE /* PipoController.swift in Sources */,
 				F80E568966B6636C933EC273 /* PipoEntity.swift in Sources */,
 				D6735C8120071C3614BEFC0D /* PipoGameApp.swift in Sources */,
+				811C106E7FA919537B7F7F9B /* PipoLog.swift in Sources */,
 				0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */,
 				ABF973AD58B82E566AB8EB0B /* Secrets.swift in Sources */,
 				991C06BF13433666BC5AC29C /* Shaders.metal in Sources */,

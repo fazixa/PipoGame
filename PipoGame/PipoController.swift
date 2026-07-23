@@ -222,13 +222,17 @@ final class PipoController: ObservableObject {
         guard let pipo, baseScale > 0 else { return 1 }
         return pipo.scale.x / baseScale
     }
-    // Tuned for Pipo's walk (v30, Mixamo-retargeted): clean flat stance —
-    // the planted foot sweeps back at a CONSTANT 2.88 m/s at the model's
-    // raw ~4.6 m size, so that IS the slide-free ground speed. PipoAsset
+    // Tuned for Pipo's walk (Universal6 rerig, Mixamo chain): clean flat
+    // stance on both feet — measured directly off the Walk action (57-joint
+    // rig, 31-frame/30fps loop) by sampling mixamorig:LeftFoot/RightFoot
+    // world position through their stance windows (frames 11-20 and 25-5
+    // respectively, where foot height is pinned flat at 0.3918). Both feet
+    // slide back at the same CONSTANT rate, ~4.72 m/s at the model's raw
+    // ~4.62 m size, so that IS the slide-free ground speed. PipoAsset
     // renders at 0.034x, and walkSpeed applies at that already-scaled size
     // (scaleFactor normalizes to 1.0 at placement scale), so fold it in:
-    // 2.88 * 0.034 ≈ 0.098.
-    private var walkSpeed: Float { (usesClips ? 0.098 : 0.22) * scaleFactor }  // m/s
+    // 4.72 * 0.034 ≈ 0.161.
+    private var walkSpeed: Float { (usesClips ? 0.161 : 0.22) * scaleFactor }  // m/s
     private let stepRate: Float = 11                          // procedural gait, rad/s
     // TEMP: climb prototype — fallback lerp speed if no climb clip loaded.
     private var climbSpeed: Float { walkSpeed * 0.5 }
@@ -863,6 +867,7 @@ final class PipoController: ObservableObject {
                 }
                 pendingSitFacing = nil
                 pelvisCorrectionTimer = 0
+                PipoLog.log("arrived at edge -> .sitting. walkPlayback valid=\(walkPlayback?.isValid ?? false) playing=\(walkPlayback?.isPlaying ?? false) usesClips=\(usesClips) sitClip=\(sitClip != nil)")
                 state = .sitting
                 isSitting = true
                 return
@@ -1520,14 +1525,20 @@ final class PipoController: ObservableObject {
     }
 
     private func startSitClipIfNeeded() {
-        guard let clip = sitClip, let owner = animationOwner else { return }
+        guard let clip = sitClip, let owner = animationOwner else {
+            PipoLog.log("startSitClipIfNeeded: bail — clip=\(sitClip != nil) owner=\(animationOwner != nil)")
+            return
+        }
         if let playback = sitPlayback, playback.isValid {
+            PipoLog.log("startSitClipIfNeeded: resuming existing playback, isPlaying=\(playback.isPlaying)")
             playback.speed = 1
             playback.resume()
         } else {
+            PipoLog.log("startSitClipIfNeeded: starting fresh playback on owner=\(owner.name) clip.duration=\(clip.definition.duration)")
             sitPlayback = owner.playAnimation(clip.repeat(),
                                               transitionDuration: 0.25,
                                               startsPaused: false)
+            PipoLog.log("startSitClipIfNeeded: sitPlayback created=\(sitPlayback != nil) isValid=\(sitPlayback?.isValid ?? false)")
         }
     }
 
