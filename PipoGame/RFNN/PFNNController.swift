@@ -62,6 +62,13 @@ final class PFNNController: ObservableObject {
     private var triangles: [UInt32] = []
     private var skinnedPositions: [SIMD3<Float>] = []
     private var skinnedNormals: [SIMD3<Float>] = []
+    // The single live MeshResource, mutated in place every frame via
+    // .replace(with:) -- see writeSkinnedMesh's doc comment for why this
+    // replaced the original approach of calling MeshResource.generate(from:)
+    // fresh every frame (a brand-new GPU-backed resource + a full
+    // ModelComponent.mesh reassignment 60x/sec, a likely cause of reported
+    // flicker/hitching).
+    private var meshResource: MeshResource?
     private var skinMatrices = [simd_float4x4](repeating: matrix_identity_float4x4, count: PFNNCharacter.jointCount)
     private let material = SimpleMaterial(color: .white, isMetallic: false)
 
@@ -142,6 +149,7 @@ final class PFNNController: ObservableObject {
 
         self.anchor = placementAnchor
         self.meshEntity = mesh
+        self.meshResource = initialMesh
         self.spawnRootPosition = .zero
         debugLoggedFirstFrame = false
 
@@ -153,6 +161,7 @@ final class PFNNController: ObservableObject {
         anchor?.removeFromParent()
         anchor = nil
         meshEntity = nil
+        meshResource = nil
         character = nil
         isPlaced = false
     }
@@ -323,8 +332,9 @@ final class PFNNController: ObservableObject {
     }
 
     /// Skins the mesh BY HAND (Linear Blend Skinning, per-vertex, on the
-    /// CPU) and replaces the entity's MeshResource wholesale every frame,
-    /// instead of writing RealityKit's `jointTransforms` at all.
+    /// CPU) and updates the puppet's single MeshResource IN PLACE every
+    /// frame (`.replace(with:)`), instead of writing RealityKit's
+    /// `jointTransforms` at all.
     ///
     /// This exists because an extensive investigation this session (a
     /// dedicated Swift/RealityKit sandbox — a macOS ARView driving this
@@ -346,13 +356,16 @@ final class PFNNController: ObservableObject {
     /// `rootYaw` for every joint (see decode()), so the skinned vertex
     /// positions themselves carry the character's absolute movement.
     ///
-    /// Regenerating a whole MeshResource every frame is not the most
-    /// efficient possible approach (an in-place `MeshResource.replace`
-    /// would avoid re-allocating GPU buffers each time) but is the
-    /// simplest correct one — worth revisiting only if profiling on
-    /// device shows it's actually a bottleneck at 11,200 vertices.
+    /// Mutates the SAME MeshResource (a reference type) every frame via
+    /// `.replace(with:)` rather than calling `MeshResource.generate(from:)`
+    /// fresh each time — the original version did that, allocating an
+    /// entirely new GPU-backed resource and reassigning
+    /// `ModelComponent.mesh` 60x/sec, a likely cause of reported
+    /// flicker/hitching (device LiDAR occlusion updates are a separate,
+    /// independent possible cause and weren't ruled out — worth comparing
+    /// against once this change is tested).
     private func writeSkinnedMesh(character: PFNNCharacter) {
-        guard let meshEntity else { return }
+        guard let meshResource else { return }
         for j in 0..<PFNNCharacter.jointCount {
             skinMatrices[j] = character.jointGlobalAnim[j] * character.jointGlobalRest[j].inverse
         }
@@ -374,16 +387,25 @@ final class PFNNController: ObservableObject {
             skinnedNormals[v] = simd_length_squared(nrm) > 1e-8 ? simd_normalize(nrm) : restNormals[v]
         }
 
-        guard let newMesh = Self.buildMeshResource(positions: skinnedPositions, normals: skinnedNormals, triangles: triangles) else { return }
-        meshEntity.model?.mesh = newMesh
+        guard let content = Self.buildMeshContents(positions: skinnedPositions, normals: skinnedNormals, triangles: triangles) else { return }
+        try? meshResource.replace(with: content)
     }
 
     private static func buildMeshResource(positions: [SIMD3<Float>], normals: [SIMD3<Float>], triangles: [UInt32]) -> MeshResource? {
+        guard let content = buildMeshContents(positions: positions, normals: normals, triangles: triangles) else { return nil }
+        return try? MeshResource.generate(from: content)
+    }
+
+    private static func buildMeshContents(positions: [SIMD3<Float>], normals: [SIMD3<Float>], triangles: [UInt32]) -> MeshResource.Contents? {
         var descriptor = MeshDescriptor(name: "PFNNSkinned")
         descriptor.positions = MeshBuffer(positions)
         descriptor.normals = MeshBuffer(normals)
         descriptor.primitives = .triangles(triangles)
-        return try? MeshResource.generate(from: [descriptor])
+        guard let model = try? MeshResource.Model(id: "PFNNSkinnedModel", descriptors: [descriptor]) else { return nil }
+        var contents = MeshResource.Contents()
+        contents.models = MeshModelCollection([model])
+        contents.instances = MeshInstanceCollection([MeshResource.Instance(id: "PFNNSkinnedInstance", model: "PFNNSkinnedModel")])
+        return contents
     }
 
     /// Parses `character_vertices.bin`/`character_triangles.bin` directly
