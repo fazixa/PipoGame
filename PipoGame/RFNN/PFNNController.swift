@@ -69,6 +69,24 @@ final class PFNNController: ObservableObject {
     private let groundHeightCacheCellSize: Float = 0.05 // meters
     private let groundHeightCacheLifetime = 12 // frames (~0.2s at 60fps)
 
+    // Fixed-timestep decoupling: PFNN's phase-advance formula (see
+    // runSimulationStep) has NO dt term -- it advances gait by a fixed
+    // amount per SIMULATION STEP, matching the original demo's "one
+    // prediction per displayed frame" training assumption at 60fps. If the
+    // render callback rate itself drops (e.g. thermal throttling halving
+    // it to 30fps), naively running one simulation step per callback would
+    // silently halve the character's internal gait clock -- it would look
+    // like it's moving in slow motion even though rendering stays smooth.
+    // simulationAccumulator banks real elapsed time; update() runs
+    // runSimulationStep as many times as needed (capped) to catch the
+    // simulation clock up to real time, independent of callback rate --
+    // mirrors the camdmCharacter branch's own proven fixed-timestep
+    // catch-up loop (CAMDMCharacterPreview.tick()).
+    private let simulationStep: Float = 1.0 / 60.0
+    private var simulationAccumulator: Float = 0
+    private let maxCatchUpSteps = 8 // avoids a runaway loop after e.g. a long pause
+    private var profileSimSteps = 0
+
     // Profiling: logs a summary roughly once per REAL second (time-based,
     // not frame-count-based, so it stays ~1s even once FPS has already
     // dropped) -- device thermal/power state, actual frame time / derived
@@ -176,6 +194,7 @@ final class PFNNController: ObservableObject {
         smoothedRootHeight = nil
         groundHeightCache.removeAll()
         frameCounter = 0
+        simulationAccumulator = 0
 
         trajectory.reset(at: .zero, groundHeight: { _ in 0 })
         isPlaced = true
@@ -194,9 +213,42 @@ final class PFNNController: ObservableObject {
     private var debugLoggedFirstFrame = false
 
     func update(deltaTime dt: Float) {
-        guard isPlaced, let network, let character, arView != nil else { return }
+        guard isPlaced, network != nil, let character, arView != nil else { return }
         let frameStart = CFAbsoluteTimeGetCurrent()
         frameCounter += 1
+
+        // Catch the simulation clock up to real time -- see
+        // simulationAccumulator's doc comment for why this loop exists.
+        // Ordinarily this runs exactly once (accumulator holds ~1 step's
+        // worth of dt at 60fps); under thermal throttling at 30fps it runs
+        // twice per callback, keeping gait speed correct in real time.
+        simulationAccumulator += dt
+        var safetyCap = maxCatchUpSteps
+        while simulationAccumulator >= simulationStep, safetyCap > 0 {
+            simulationAccumulator -= simulationStep
+            runSimulationStep(character: character)
+            profileSimSteps += 1
+            safetyCap -= 1
+        }
+
+        // Rendering happens once per actual callback regardless of how
+        // many simulation steps just ran, using the latest post-catch-up
+        // character state.
+        let t = CFAbsoluteTimeGetCurrent()
+        writeJointTransforms(character: character)
+        profileWriteJointsTime += CFAbsoluteTimeGetCurrent() - t
+
+        logProfileIfDue(dt: dt, frameCPUTime: CFAbsoluteTimeGetCurrent() - frameStart)
+    }
+
+    /// One fixed-size PFNN simulation tick (`simulationStep` = 1/60s of
+    /// puppet time): pre_render() -> predict() -> decode()/IK ->
+    /// post_render(), verbatim per pfnn.cpp aside from the dt-based root-
+    /// height damping. May run more than once per actual `update()` call
+    /// when the render callback rate has dropped below 60fps -- see
+    /// `update()`'s catch-up loop.
+    private func runSimulationStep(character: PFNNCharacter) {
+        guard let network else { return }
 
         updateTargetFromJoystick()
         trajectory.updateGait(gaitSmooth: 0.1)
@@ -214,8 +266,10 @@ final class PFNNController: ObservableObject {
         // noise instead). That raw height fed straight into decode() with
         // no smoothing at all, so every mesh revision was an instant snap
         // in the rendered Hip position -- the reported vertical jitter.
+        // Uses the fixed simulationStep (not real dt) since this runs once
+        // per simulation tick, not once per render callback.
         let rawRootHeight = trajectory.heights[PFNNTrajectory.half]
-        let dampedRootHeight = smoothedRootHeight.map { damp($0, rawRootHeight, rate: 12, dt: dt) } ?? rawRootHeight
+        let dampedRootHeight = smoothedRootHeight.map { damp($0, rawRootHeight, rate: 12, dt: simulationStep) } ?? rawRootHeight
         smoothedRootHeight = dampedRootHeight
         trajectory.heights[PFNNTrajectory.half] = dampedRootHeight
 
@@ -246,11 +300,7 @@ final class PFNNController: ObservableObject {
             profileIKTime += CFAbsoluteTimeGetCurrent() - t
         }
 
-        t = CFAbsoluteTimeGetCurrent()
-        writeJointTransforms(character: character)
-        profileWriteJointsTime += CFAbsoluteTimeGetCurrent() - t
-
-        // post_render(): advance the trajectory/phase for the NEXT frame.
+        // post_render(): advance the trajectory/phase for the NEXT step.
         trajectory.rollPastForward()
         let standAmount = powf(1 - trajectory.gaitStand[PFNNTrajectory.half], 0.25)
         trajectory.updateCurrent(rootDelta: SIMD2(yp[0], yp[1]), rootTurn: yp[2], standAmount: standAmount)
@@ -259,8 +309,6 @@ final class PFNNController: ObservableObject {
         character.phase = character.phase + (standAmount * 0.9 + 0.1) * 2 * .pi * yp[3]
         character.phase = character.phase.truncatingRemainder(dividingBy: 2 * .pi)
         if character.phase < 0 { character.phase += 2 * .pi }
-
-        logProfileIfDue(dt: dt, frameCPUTime: CFAbsoluteTimeGetCurrent() - frameStart)
     }
 
     /// Logs a profiling summary roughly once per real second -- see the
@@ -287,6 +335,7 @@ final class PFNNController: ObservableObject {
         let writeJointsMS = Float(profileWriteJointsTime / Double(n)) * 1000
         let cacheTotal = max(profileCacheHits + profileCacheMisses, 1)
         let cacheHitRate = Float(profileCacheHits) / Float(cacheTotal) * 100
+        let simStepsPerFrame = Float(profileSimSteps) / Float(n)
 
         let thermal: String
         switch ProcessInfo.processInfo.thermalState {
@@ -302,7 +351,8 @@ final class PFNNController: ObservableObject {
         PFNN profile: fps=\(String(format: "%.1f", avgFPS)) avgFrame=\(String(format: "%.2f", avgFrameMS))ms maxFrame=\(String(format: "%.2f", maxFrameMS))ms \
         | thermal=\(thermal) lowPower=\(lowPower) memMB=\(String(format: "%.1f", residentMemoryMB())) \
         | perStage(ms): groundHeight=\(String(format: "%.2f", groundHeightMS)) network=\(String(format: "%.2f", networkMS)) assembleInput=\(String(format: "%.2f", assembleMS)) decode=\(String(format: "%.2f", decodeMS)) ik=\(String(format: "%.2f", ikMS)) writeJoints=\(String(format: "%.2f", writeJointsMS)) \
-        | groundHeightCache: hitRate=\(String(format: "%.0f", cacheHitRate))% size=\(groundHeightCache.count) calls/frame=\(cacheTotal / n)
+        | groundHeightCache: hitRate=\(String(format: "%.0f", cacheHitRate))% size=\(groundHeightCache.count) calls/frame=\(cacheTotal / n) \
+        | simSteps/frame=\(String(format: "%.2f", simStepsPerFrame))
         """)
 
         profileAccumTime = 0
@@ -317,6 +367,7 @@ final class PFNNController: ObservableObject {
         profileWriteJointsTime = 0
         profileCacheHits = 0
         profileCacheMisses = 0
+        profileSimSteps = 0
     }
 
     /// Resident memory footprint in MB, via the standard mach task-info
