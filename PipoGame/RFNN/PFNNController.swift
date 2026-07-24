@@ -32,6 +32,10 @@ final class PFNNController: ObservableObject {
     // not something to re-derive from real-world units.
     private let nativeWalkSpeed: Float = 3.5
 
+    // User-adjustable multiplier on top of nativeWalkSpeed (UI slider).
+    // 1.0 matches the network's own trained walk speed.
+    @Published var speedMultiplier: Float = 1.0
+
     // Puppet mesh height is ~157 native units (measured directly off
     // character_vertices.bin); scaling so that renders at ~1.7m, then
     // scaled down further to 0.3x (~0.5m) per request.
@@ -45,6 +49,10 @@ final class PFNNController: ObservableObject {
     private var anchor: AnchorEntity?
     private var meshEntity: ModelEntity?
     private var anchorPosition: SIMD3<Float> = .zero
+    // Damped root height, carried frame-to-frame -- see its use in update()
+    // for why this exists (smooths sudden LiDAR mesh-revision jumps).
+    // Reset to nil at spawn so the first frame doesn't damp from a stale value.
+    private var smoothedRootHeight: Float?
 
     // Joint names in the exact order character_parents.bin/build_puppet.py
     // use (independently verified earlier this session against parent
@@ -127,6 +135,7 @@ final class PFNNController: ObservableObject {
         self.anchor = placementAnchor
         self.meshEntity = entity
         debugLoggedFirstFrame = false
+        smoothedRootHeight = nil
 
         trajectory.reset(at: .zero, groundHeight: { _ in 0 })
         isPlaced = true
@@ -150,6 +159,23 @@ final class PFNNController: ObservableObject {
         updateTargetFromJoystick()
         trajectory.updateGait(gaitSmooth: 0.1)
         trajectory.predictFuture(strafeAmount: 0, responsive: false, groundHeight: groundHeightNative)
+
+        // Damps the freshly-recomputed root height toward its own previous
+        // (already-damped) value, matching PipoController's own proven
+        // groundedHeight/damp pattern (rate 12) -- diagnosed via device
+        // logs (walking up a slope) that predictFuture()'s ground-height
+        // raycast can JUMP discretely frame-to-frame as ARKit's LiDAR scene
+        // mesh revises its estimate of the surface (confirmed via a FIXED,
+        // never-moving query point ALSO jumping in lockstep with the
+        // trajectory-averaged height, ruling out "sample points drifting
+        // as the character walks" and pointing at genuine mesh-reconstruction
+        // noise instead). That raw height fed straight into decode() with
+        // no smoothing at all, so every mesh revision was an instant snap
+        // in the rendered Hip position -- the reported vertical jitter.
+        let rawRootHeight = trajectory.heights[PFNNTrajectory.half]
+        let dampedRootHeight = smoothedRootHeight.map { damp($0, rawRootHeight, rate: 12, dt: dt) } ?? rawRootHeight
+        smoothedRootHeight = dampedRootHeight
+        trajectory.heights[PFNNTrajectory.half] = dampedRootHeight
 
         // pre_render(): decode using the CURRENT (not-yet-advanced) root.
         let rootPosition = trajectory.rootPosition
@@ -199,7 +225,7 @@ final class PFNNController: ObservableObject {
         let direction = simd_normalize(right * joystickInput.x + forward * joystickInput.y)
         let throttle = min((magnitude - joystickDeadzone) / (1 - joystickDeadzone), 1)
         trajectory.targetDir = direction
-        trajectory.targetVel = direction * (nativeWalkSpeed * throttle)
+        trajectory.targetVel = direction * (nativeWalkSpeed * speedMultiplier * throttle)
     }
 
     /// Converts a native-space XZ into the real AR world, raycasts the
@@ -216,6 +242,13 @@ final class PFNNController: ObservableObject {
             return 0
         }
         return (hit.position.y - anchorPosition.y) / nativeToMeters
+    }
+
+    /// Exponential-smoothing damp, matching PipoController's own proven
+    /// `damp`/`smoothing` pair (rate 12 there for grounded walking).
+    private func smoothing(rate: Float, dt: Float) -> Float { 1 - exp(-rate * dt) }
+    private func damp(_ current: Float, _ target: Float, rate: Float, dt: Float) -> Float {
+        current + (target - current) * smoothing(rate: rate, dt: dt)
     }
 
     /// pre_render()'s full Xp assembly -- trajectory pos/dir/gait sampled

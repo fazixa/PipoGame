@@ -42,6 +42,23 @@ struct ContentView: View {
                 }
                 .padding(.trailing, 8)
                 .padding(.bottom, 140)
+
+                VStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "hare")
+                            .font(.footnote)
+                        Slider(value: $rfnnController.speedMultiplier, in: 0.25...2.0)
+                        Text(String(format: "%.2fx", rfnnController.speedMultiplier))
+                            .font(.footnote.monospacedDigit())
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.horizontal, 24)
+                    Spacer()
+                }
+                .padding(.top, 60)
             }
 
             if uiVisible {
