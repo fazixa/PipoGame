@@ -5,6 +5,8 @@ import Combine
 
 struct ARViewContainer: UIViewRepresentable {
     @ObservedObject var controller: PipoController
+    @ObservedObject var rfnnController: PFNNController
+    @ObservedObject var testRig: PFNNTestRig
 
     func makeUIView(context: Context) -> ARView {
         let arView = ARView(frame: .zero)
@@ -62,8 +64,12 @@ struct ARViewContainer: UIViewRepresentable {
         arView.addGestureRecognizer(rotation)
 
         controller.arView = arView
-        context.coordinator.updateSubscription = arView.scene.subscribe(to: SceneEvents.Update.self) { [weak controller] event in
+        rfnnController.arView = arView
+        testRig.arView = arView
+        context.coordinator.updateSubscription = arView.scene.subscribe(to: SceneEvents.Update.self) { [weak controller, weak rfnnController, weak testRig] event in
             controller?.update(deltaTime: Float(event.deltaTime))
+            rfnnController?.update(deltaTime: Float(event.deltaTime))
+            testRig?.update(deltaTime: Float(event.deltaTime))
         }
 
         return arView

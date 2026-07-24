@@ -2,12 +2,14 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var controller = PipoController()
+    @StateObject private var rfnnController = PFNNController()
+    @StateObject private var testRig = PFNNTestRig()
     @StateObject private var recorder = ScreenRecorder()
     @State private var uiVisible = true
 
     var body: some View {
         ZStack {
-            ARViewContainer(controller: controller)
+            ARViewContainer(controller: controller, rfnnController: rfnnController, testRig: testRig)
                 .ignoresSafeArea()
 
             // Game mode: floating joystick over the lower-left region,
@@ -23,6 +25,22 @@ struct ContentView: View {
                     }
                 }
                 .padding(.leading, 8)
+                .padding(.bottom, 140)
+            }
+
+            // TEMP: PFNN puppet spike -- own joystick, independent of Pipo's
+            // own game mode, so the two characters can be tested/compared
+            // side by side.
+            if rfnnController.isPlaced && uiVisible {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        JoystickOverlay { rfnnController.joystickInput = $0 }
+                            .frame(width: 240, height: 280)
+                    }
+                }
+                .padding(.trailing, 8)
                 .padding(.bottom, 140)
             }
 
@@ -79,6 +97,25 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .disabled(!controller.isPlaced || controller.isDrawingPath || controller.isFreehand)
+
+                        // TEMP: PFNN puppet spike -- own rig/mesh, no
+                        // retargeting onto Pipo, just to test the ported
+                        // network directly.
+                        Button {
+                            rfnnController.toggle()
+                        } label: {
+                            Image(systemName: rfnnController.isPlaced ? "figure.walk.circle.fill" : "figure.walk.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+
+                        // TEMP: minimal 2-joint test rig, isolating
+                        // RealityKit's exact jointTransforms convention.
+                        Button {
+                            testRig.toggle()
+                        } label: {
+                            Image(systemName: testRig.isPlaced ? "checkmark.circle.fill" : "figure.stand")
+                                .frame(maxWidth: .infinity)
+                        }
 
                         Button {
                             startRecording()

@@ -10,44 +10,68 @@
 		00770859618EDA10E56BBEA6 /* PipoLand.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 63350C6694D9230FAF14A108 /* PipoLand.usdz */; };
 		0A8CFA4023FD13B01D6ED8CB /* ScreenRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4812E2D24072F30671570668 /* ScreenRecorder.swift */; };
 		13B81A892FCC2AB95980FD68 /* Pipo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = DB7D83D29C503B65E76F174D /* Pipo.usdz */; };
+		15DD3CA04FBD0F04A5332CBD /* PFNNTrajectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7D3C9B2FEEDE8CD0F096BA /* PFNNTrajectory.swift */; };
+		1AE37744C5C94DEDFD473145 /* PFNNNetwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7695579054C028EE7CE2A44D /* PFNNNetwork.swift */; };
 		1FA51DF1609E6B446ED57D2F /* SittingTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = E85E8FC2431191B921D1004B /* SittingTest.usdz */; };
+		1FE73B3F4191341AF2F82F39 /* PFNNCharacterTriangles.bin in Resources */ = {isa = PBXBuildFile; fileRef = C3640F772DE1EFD0BAB61A46 /* PFNNCharacterTriangles.bin */; };
+		247EE0480A3BCBC01B03A7B4 /* PFNNCharacterVertices.bin in Resources */ = {isa = PBXBuildFile; fileRef = 6F7F8628AD95D230B5BB4DD7 /* PFNNCharacterVertices.bin */; };
+		329297F0BBB7DA380D5CA5CF /* PFNNWeights.bin in Resources */ = {isa = PBXBuildFile; fileRef = 500937B7B037237932F7EB0B /* PFNNWeights.bin */; };
 		32989C1684D53131F4FF8280 /* ToonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */; };
 		37A465BE65E498816230F8EB /* ClimbTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 89C415CD2249D6275C98D31C /* ClimbTest.usdz */; };
+		48F22D6DEF6A18954827DD8C /* PFNNController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20AE99FD6F416563B00F9435 /* PFNNController.swift */; };
 		811C106E7FA919537B7F7F9B /* PipoLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095878509CE2611DA26928EB /* PipoLog.swift */; };
 		866BE0A76D530D15462C5113 /* ARViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030D1E6608E3E43A464A3336 /* ARViewContainer.swift */; };
 		929BC98FA554049C9E143AE3 /* LandTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 24879FDCF1A35F9D18CC7CE3 /* LandTest.usdz */; };
 		991C06BF13433666BC5AC29C /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5B9A036E4DACE0CE732B0DBF /* Shaders.metal */; };
+		9A991DC56F721CD76B613D8E /* PFNNPuppet.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 932F41211FDB19C30479840D /* PFNNPuppet.usdz */; };
+		AB08525993BD4BF7FC11E526 /* PFNNCharacter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99332B6E9EE1C5AADB62734 /* PFNNCharacter.swift */; };
 		ABF973AD58B82E566AB8EB0B /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B36ADF9DB382291B734D1C3 /* Secrets.swift */; };
+		C5E46C8ECF9E369FD07D0C6A /* PFNNCharacterParents.bin in Resources */ = {isa = PBXBuildFile; fileRef = 8353B3B384361AA4813E69DA /* PFNNCharacterParents.bin */; };
+		D1456A5826D62CB3625A8CC1 /* PFNNTestRig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586FDA588C72E6794721E827 /* PFNNTestRig.swift */; };
 		D4F0FEB98EC4CFE75F3068D1 /* PipoSit.usdz in Resources */ = {isa = PBXBuildFile; fileRef = AC9AB72A45FB4D6ACAA5DC54 /* PipoSit.usdz */; };
 		D554773950E13F128CB326FA /* PipoAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A380F57777D8DF30632D7FB1 /* PipoAsset.swift */; };
 		D6735C8120071C3614BEFC0D /* PipoGameApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3597C6801AA242234D6077A /* PipoGameApp.swift */; };
 		D6BC045CBDF1801AF8E903F7 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEA526BF4F634AF3D407FF0 /* ContentView.swift */; };
+		D9ADEBF1EED78407541AF88D /* TestRig.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 02B26E0D60EAAD0B4A407F3A /* TestRig.usdz */; };
+		E1E9BED05004996EBF2EA2D1 /* PFNNCharacterRestXforms.bin in Resources */ = {isa = PBXBuildFile; fileRef = 1C30C9CE10C5D6F03FF394C4 /* PFNNCharacterRestXforms.bin */; };
 		F6E844D1582E26870BB48D17 /* WalkTest.usdz in Resources */ = {isa = PBXBuildFile; fileRef = CC151425FCBC000EA3B6F102 /* WalkTest.usdz */; };
 		F80E568966B6636C933EC273 /* PipoEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */; };
 		F9E10DF5C3C2CD9371F1C1FE /* PipoController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137F4E6E2FB64259EFA56AA9 /* PipoController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		02B26E0D60EAAD0B4A407F3A /* TestRig.usdz */ = {isa = PBXFileReference; includeInIndex = 1; path = TestRig.usdz; sourceTree = "<group>"; };
 		030D1E6608E3E43A464A3336 /* ARViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARViewContainer.swift; sourceTree = "<group>"; };
 		095878509CE2611DA26928EB /* PipoLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoLog.swift; sourceTree = "<group>"; };
 		137F4E6E2FB64259EFA56AA9 /* PipoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoController.swift; sourceTree = "<group>"; };
+		1C30C9CE10C5D6F03FF394C4 /* PFNNCharacterRestXforms.bin */ = {isa = PBXFileReference; includeInIndex = 1; path = PFNNCharacterRestXforms.bin; sourceTree = "<group>"; };
+		20AE99FD6F416563B00F9435 /* PFNNController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PFNNController.swift; sourceTree = "<group>"; };
 		24879FDCF1A35F9D18CC7CE3 /* LandTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = LandTest.usdz; sourceTree = "<group>"; };
 		4812E2D24072F30671570668 /* ScreenRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenRecorder.swift; sourceTree = "<group>"; };
 		4B36ADF9DB382291B734D1C3 /* Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Secrets.swift; sourceTree = "<group>"; };
+		500937B7B037237932F7EB0B /* PFNNWeights.bin */ = {isa = PBXFileReference; includeInIndex = 1; path = PFNNWeights.bin; sourceTree = "<group>"; };
+		586FDA588C72E6794721E827 /* PFNNTestRig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PFNNTestRig.swift; sourceTree = "<group>"; };
 		5B9A036E4DACE0CE732B0DBF /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		5C7D3C9B2FEEDE8CD0F096BA /* PFNNTrajectory.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PFNNTrajectory.swift; sourceTree = "<group>"; };
 		6259E7E2DDA6889E1029CA3E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		63350C6694D9230FAF14A108 /* PipoLand.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = PipoLand.usdz; sourceTree = "<group>"; };
 		6EEA526BF4F634AF3D407FF0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		6F7F8628AD95D230B5BB4DD7 /* PFNNCharacterVertices.bin */ = {isa = PBXFileReference; includeInIndex = 1; path = PFNNCharacterVertices.bin; sourceTree = "<group>"; };
+		7695579054C028EE7CE2A44D /* PFNNNetwork.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PFNNNetwork.swift; sourceTree = "<group>"; };
 		79929F788216D50FA536CFD4 /* PipoGame.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PipoGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8353B3B384361AA4813E69DA /* PFNNCharacterParents.bin */ = {isa = PBXFileReference; includeInIndex = 1; path = PFNNCharacterParents.bin; sourceTree = "<group>"; };
 		89C415CD2249D6275C98D31C /* ClimbTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = ClimbTest.usdz; sourceTree = "<group>"; };
+		932F41211FDB19C30479840D /* PFNNPuppet.usdz */ = {isa = PBXFileReference; includeInIndex = 1; path = PFNNPuppet.usdz; sourceTree = "<group>"; };
 		A380F57777D8DF30632D7FB1 /* PipoAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoAsset.swift; sourceTree = "<group>"; };
 		AC9AB72A45FB4D6ACAA5DC54 /* PipoSit.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = PipoSit.usdz; sourceTree = "<group>"; };
+		C3640F772DE1EFD0BAB61A46 /* PFNNCharacterTriangles.bin */ = {isa = PBXFileReference; includeInIndex = 1; path = PFNNCharacterTriangles.bin; sourceTree = "<group>"; };
 		C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToonStyle.swift; sourceTree = "<group>"; };
 		CC151425FCBC000EA3B6F102 /* WalkTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = WalkTest.usdz; sourceTree = "<group>"; };
 		DA2B8AD067BEFE2245275D4B /* PipoEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoEntity.swift; sourceTree = "<group>"; };
 		DB7D83D29C503B65E76F174D /* Pipo.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = Pipo.usdz; sourceTree = "<group>"; };
 		E3597C6801AA242234D6077A /* PipoGameApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipoGameApp.swift; sourceTree = "<group>"; };
 		E85E8FC2431191B921D1004B /* SittingTest.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = SittingTest.usdz; sourceTree = "<group>"; };
+		E99332B6E9EE1C5AADB62734 /* PFNNCharacter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PFNNCharacter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -61,6 +85,13 @@
 				AC9AB72A45FB4D6ACAA5DC54 /* PipoSit.usdz */,
 				E85E8FC2431191B921D1004B /* SittingTest.usdz */,
 				CC151425FCBC000EA3B6F102 /* WalkTest.usdz */,
+				932F41211FDB19C30479840D /* PFNNPuppet.usdz */,
+				500937B7B037237932F7EB0B /* PFNNWeights.bin */,
+				8353B3B384361AA4813E69DA /* PFNNCharacterParents.bin */,
+				1C30C9CE10C5D6F03FF394C4 /* PFNNCharacterRestXforms.bin */,
+				02B26E0D60EAAD0B4A407F3A /* TestRig.usdz */,
+				6F7F8628AD95D230B5BB4DD7 /* PFNNCharacterVertices.bin */,
+				C3640F772DE1EFD0BAB61A46 /* PFNNCharacterTriangles.bin */,
 			);
 			path = Assets;
 			sourceTree = "<group>";
@@ -89,8 +120,22 @@
 				5B9A036E4DACE0CE732B0DBF /* Shaders.metal */,
 				C9F9474FE8F3D80F5CE06454 /* ToonStyle.swift */,
 				92564A216B59D6E58AE9CA5A /* Assets */,
+				F0401B97C3869D8D8EFE3286 /* RFNN */,
 			);
 			path = PipoGame;
+			sourceTree = "<group>";
+		};
+		F0401B97C3869D8D8EFE3286 /* RFNN */ = {
+			isa = PBXGroup;
+			children = (
+				7695579054C028EE7CE2A44D /* PFNNNetwork.swift */,
+				5C7D3C9B2FEEDE8CD0F096BA /* PFNNTrajectory.swift */,
+				E99332B6E9EE1C5AADB62734 /* PFNNCharacter.swift */,
+				20AE99FD6F416563B00F9435 /* PFNNController.swift */,
+				586FDA588C72E6794721E827 /* PFNNTestRig.swift */,
+			);
+			name = RFNN;
+			path = RFNN;
 			sourceTree = "<group>";
 		};
 		F623279FB6233633ACAFCA28 /* Products */ = {
@@ -116,8 +161,6 @@
 			dependencies = (
 			);
 			name = PipoGame;
-			packageProductDependencies = (
-			);
 			productName = PipoGame;
 			productReference = 79929F788216D50FA536CFD4 /* PipoGame.app */;
 			productType = "com.apple.product-type.application";
@@ -168,6 +211,13 @@
 				D4F0FEB98EC4CFE75F3068D1 /* PipoSit.usdz in Resources */,
 				1FA51DF1609E6B446ED57D2F /* SittingTest.usdz in Resources */,
 				F6E844D1582E26870BB48D17 /* WalkTest.usdz in Resources */,
+				9A991DC56F721CD76B613D8E /* PFNNPuppet.usdz in Resources */,
+				329297F0BBB7DA380D5CA5CF /* PFNNWeights.bin in Resources */,
+				C5E46C8ECF9E369FD07D0C6A /* PFNNCharacterParents.bin in Resources */,
+				E1E9BED05004996EBF2EA2D1 /* PFNNCharacterRestXforms.bin in Resources */,
+				D9ADEBF1EED78407541AF88D /* TestRig.usdz in Resources */,
+				247EE0480A3BCBC01B03A7B4 /* PFNNCharacterVertices.bin in Resources */,
+				1FE73B3F4191341AF2F82F39 /* PFNNCharacterTriangles.bin in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -189,6 +239,11 @@
 				ABF973AD58B82E566AB8EB0B /* Secrets.swift in Sources */,
 				991C06BF13433666BC5AC29C /* Shaders.metal in Sources */,
 				32989C1684D53131F4FF8280 /* ToonStyle.swift in Sources */,
+				1AE37744C5C94DEDFD473145 /* PFNNNetwork.swift in Sources */,
+				15DD3CA04FBD0F04A5332CBD /* PFNNTrajectory.swift in Sources */,
+				AB08525993BD4BF7FC11E526 /* PFNNCharacter.swift in Sources */,
+				48F22D6DEF6A18954827DD8C /* PFNNController.swift in Sources */,
+				D1456A5826D62CB3625A8CC1 /* PFNNTestRig.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
