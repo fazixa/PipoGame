@@ -54,6 +54,20 @@ final class PFNNController: ObservableObject {
     // Reset to nil at spawn so the first frame doesn't damp from a stale value.
     private var smoothedRootHeight: Float?
 
+    // Spatial cache for groundHeightNative's real LiDAR raycasts -- see its
+    // doc comment for why this exists (~90 individual raycasts/frame from
+    // trajectory terrain sampling + IK foot-lock, cost scaling with how
+    // much of the room has been scanned, confirmed the dominant per-frame
+    // cost this session). Keyed by world x/z rounded to a 5cm grid cell;
+    // each entry expires after groundHeightCacheLifetime frames, so a real
+    // terrain change (e.g. an object placed mid-session) is picked up
+    // within at most that many frames the next time that cell is queried,
+    // not permanently stale.
+    private var groundHeightCache: [SIMD2<Int32>: (height: Float, frame: Int)] = [:]
+    private var frameCounter = 0
+    private let groundHeightCacheCellSize: Float = 0.05 // meters
+    private let groundHeightCacheLifetime = 12 // frames (~0.2s at 60fps)
+
     // Joint names in the exact order character_parents.bin/build_puppet.py
     // use (independently verified earlier this session against parent
     // indices, e.g. parents[21]=20 LeftFingerBase->LeftHand).
@@ -136,6 +150,8 @@ final class PFNNController: ObservableObject {
         self.meshEntity = entity
         debugLoggedFirstFrame = false
         smoothedRootHeight = nil
+        groundHeightCache.removeAll()
+        frameCounter = 0
 
         trajectory.reset(at: .zero, groundHeight: { _ in 0 })
         isPlaced = true
@@ -155,6 +171,7 @@ final class PFNNController: ObservableObject {
 
     func update(deltaTime dt: Float) {
         guard isPlaced, let network, let character, arView != nil else { return }
+        frameCounter += 1
 
         updateTargetFromJoystick()
         trajectory.updateGait(gaitSmooth: 0.1)
@@ -236,12 +253,24 @@ final class PFNNController: ObservableObject {
         guard let arView else { return 0 }
         let worldX = anchorPosition.x + native.x * nativeToMeters
         let worldZ = anchorPosition.z + native.y * nativeToMeters
+
+        let cellKey = SIMD2<Int32>(
+            Int32((worldX / groundHeightCacheCellSize).rounded()),
+            Int32((worldZ / groundHeightCacheCellSize).rounded()))
+        if let cached = groundHeightCache[cellKey], frameCounter - cached.frame < groundHeightCacheLifetime {
+            return cached.height
+        }
+
         let from = SIMD3<Float>(worldX, anchorPosition.y + 1.0, worldZ)
         let to = SIMD3<Float>(worldX, anchorPosition.y - 2.0, worldZ)
-        guard let hit = arView.scene.raycast(from: from, to: to, query: .nearest, mask: .sceneUnderstanding).first else {
-            return 0
+        let nativeHeight: Float
+        if let hit = arView.scene.raycast(from: from, to: to, query: .nearest, mask: .sceneUnderstanding).first {
+            nativeHeight = (hit.position.y - anchorPosition.y) / nativeToMeters
+        } else {
+            nativeHeight = 0
         }
-        return (hit.position.y - anchorPosition.y) / nativeToMeters
+        groundHeightCache[cellKey] = (nativeHeight, frameCounter)
+        return nativeHeight
     }
 
     /// Exponential-smoothing damp, matching PipoController's own proven
