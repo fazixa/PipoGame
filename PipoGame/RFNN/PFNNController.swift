@@ -6,9 +6,10 @@ import Combine
 /// Orchestrates the PFNN puppet: owns the network/trajectory/character
 /// state, assembles the network's 342-dim input vector and decodes its
 /// 311-dim output exactly per `sreyafrancis/PFNN`'s `demo/pfnn.cpp`
-/// (`pre_render()`/`post_render()`), and skins the puppet's mesh BY HAND
-/// every frame (see `writeSkinnedMesh`'s doc comment for why this doesn't
-/// use RealityKit's own `jointTransforms`/skeletal skinning at all).
+/// (`pre_render()`/`post_render()`), and drives the puppet's skeleton via
+/// RealityKit's own `jointTransforms` every frame — see `writeJointTransforms`'s
+/// doc comment for why the skeleton/mesh are built NATIVELY in Swift from
+/// the raw PFNN binaries rather than loaded from a USDZ.
 ///
 /// Everything here (trajectory, joints, IK) runs in the PUPPET'S OWN
 /// native units (matching its bundled rig/mesh, NOT meters) except at the
@@ -44,33 +45,19 @@ final class PFNNController: ObservableObject {
     private var anchor: AnchorEntity?
     private var meshEntity: ModelEntity?
     private var anchorPosition: SIMD3<Float> = .zero
-    // The trajectory's native-space root position at spawn (all-zero, see
-    // trajectory.reset) -- kept so per-frame root motion can be expressed
-    // as an offset from it. No longer used to move an entity (see
-    // writeSkinnedMesh) but retained for the diagnostic log line.
-    private var spawnRootPosition: SIMD3<Float> = .zero
 
-    // Rest-pose mesh data (positions/normals/skin weights/joint indices/
-    // triangles), loaded once per spawn straight from the raw PFNN
-    // binaries -- the same source build_puppet.py used to author the
-    // (now-unused) USDZ. Skinned by hand into `skinnedPositions`/
-    // `skinnedNormals` every frame.
-    private var restPositions: [SIMD3<Float>] = []
-    private var restNormals: [SIMD3<Float>] = []
-    private var skinWeights: [SIMD4<Float>] = []
-    private var skinJointIndices: [SIMD4<Int32>] = []
-    private var triangles: [UInt32] = []
-    private var skinnedPositions: [SIMD3<Float>] = []
-    private var skinnedNormals: [SIMD3<Float>] = []
-    // The single live MeshResource, mutated in place every frame via
-    // .replace(with:) -- see writeSkinnedMesh's doc comment for why this
-    // replaced the original approach of calling MeshResource.generate(from:)
-    // fresh every frame (a brand-new GPU-backed resource + a full
-    // ModelComponent.mesh reassignment 60x/sec, a likely cause of reported
-    // flicker/hitching).
-    private var meshResource: MeshResource?
-    private var skinMatrices = [simd_float4x4](repeating: matrix_identity_float4x4, count: PFNNCharacter.jointCount)
-    private let material = SimpleMaterial(color: .white, isMetallic: false)
+    // Joint names in the exact order character_parents.bin/build_puppet.py
+    // use (independently verified earlier this session against parent
+    // indices, e.g. parents[21]=20 LeftFingerBase->LeftHand).
+    private static let jointNames = [
+        "Hips", "LHipJoint", "LeftUpLeg", "LeftLeg", "LeftFoot", "LeftToeBase",
+        "RHipJoint", "RightUpLeg", "RightLeg", "RightFoot", "RightToeBase",
+        "LowerBack", "Spine", "Spine1", "Neck", "Neck1", "Head",
+        "LeftShoulder", "LeftArm", "LeftForeArm", "LeftHand", "LeftFingerBase",
+        "LeftHandIndex1", "LThumb",
+        "RightShoulder", "RightArm", "RightForeArm", "RightHand", "RightFingerBase",
+        "RightHandIndex1", "RThumb",
+    ]
 
     init() {
         network = PFNNNetwork()
@@ -90,9 +77,6 @@ final class PFNNController: ObservableObject {
     private func spawn() {
         guard !isPlaced, let arView else { return }
 
-        // Rest data parsed straight from the raw rig binaries (the exact
-        // same source the puppet's own mesh was authored from) -- this
-        // drives the hand-rolled skinning below, not RealityKit's skeleton.
         guard let (parents, restLocal) = Self.loadRig() else {
             PipoLog.log("PFNNController: failed to load rig binaries")
             return
@@ -101,13 +85,6 @@ final class PFNNController: ObservableObject {
             PipoLog.log("PFNNController: failed to load raw mesh binaries")
             return
         }
-        restPositions = rawMesh.positions
-        restNormals = rawMesh.normals
-        skinWeights = rawMesh.weights
-        skinJointIndices = rawMesh.jointIndices
-        triangles = rawMesh.triangles
-        skinnedPositions = restPositions
-        skinnedNormals = restNormals
 
         let newCharacter = PFNNCharacter(parents: parents, restLocal: restLocal)
         if let network {
@@ -136,21 +113,19 @@ final class PFNNController: ObservableObject {
         }
         anchorPosition = spawnPosition
 
-        guard let initialMesh = Self.buildMeshResource(positions: restPositions, normals: restNormals, triangles: triangles) else {
-            PipoLog.log("PFNNController: failed to generate initial mesh resource")
+        guard let mesh = Self.buildMeshResource(parents: parents, restLocal: restLocal, rawMesh: rawMesh) else {
+            PipoLog.log("PFNNController: failed to build native skeleton/mesh resource")
             return
         }
-        let mesh = ModelEntity(mesh: initialMesh, materials: [material])
-        mesh.scale = SIMD3<Float>(repeating: nativeToMeters)
+        let entity = ModelEntity(mesh: mesh, materials: [SimpleMaterial(color: .white, isMetallic: false)])
+        entity.scale = SIMD3<Float>(repeating: nativeToMeters)
 
         let placementAnchor = AnchorEntity(world: spawnPosition)
-        placementAnchor.addChild(mesh)
+        placementAnchor.addChild(entity)
         arView.scene.addAnchor(placementAnchor)
 
         self.anchor = placementAnchor
-        self.meshEntity = mesh
-        self.meshResource = initialMesh
-        self.spawnRootPosition = .zero
+        self.meshEntity = entity
         debugLoggedFirstFrame = false
 
         trajectory.reset(at: .zero, groundHeight: { _ in 0 })
@@ -161,7 +136,6 @@ final class PFNNController: ObservableObject {
         anchor?.removeFromParent()
         anchor = nil
         meshEntity = nil
-        meshResource = nil
         character = nil
         isPlaced = false
     }
@@ -194,7 +168,7 @@ final class PFNNController: ObservableObject {
             character.applyIK(yp: yp, groundHeight: groundHeightNative)
         }
 
-        writeSkinnedMesh(character: character)
+        writeJointTransforms(character: character)
 
         // post_render(): advance the trajectory/phase for the NEXT frame.
         trajectory.rollPastForward()
@@ -331,88 +305,94 @@ final class PFNNController: ObservableObject {
         }
     }
 
-    /// Skins the mesh BY HAND (Linear Blend Skinning, per-vertex, on the
-    /// CPU) and updates the puppet's single MeshResource IN PLACE every
-    /// frame (`.replace(with:)`), instead of writing RealityKit's
-    /// `jointTransforms` at all.
+    /// Writes each joint's FULL local transform (translation AND rotation,
+    /// via `Transform(matrix:)`) into the puppet's `jointTransforms` every
+    /// frame, driving RealityKit's own GPU skeletal skinning directly.
     ///
-    /// This exists because an extensive investigation this session (a
-    /// dedicated Swift/RealityKit sandbox — a macOS ARView driving this
-    /// port's own real PFNNNetwork/PFNNCharacter code against the real
-    /// puppet mesh, snapshotted to PNG, tested well over a dozen
-    /// jointTransforms conventions: rotation-only, full transforms,
-    /// absolute vs. delta rotation, both multiplication orders, in-place
-    /// mutation preserving the mesh's own default scale/translation, a
-    /// known precedent from another branch's CAMDM system) found that
-    /// RealityKit's own built-in skeletal skinning distorts THIS mesh's
-    /// torso/collar region (confirmed via Blender inspection to have wide,
-    /// ordinary-looking multi-joint blend weights there) no matter how
-    /// jointTransforms is written. The exact same Linear Blend Skinning
-    /// math (`worldPose[j] * inverse(worldRest[j])`, per-vertex weighted
-    /// sum) applied directly to raw vertex positions instead renders
-    /// perfectly cleanly at every frame tested across a full walk cycle.
-    /// Root motion and turning need no separate entity-level transform:
-    /// `character.jointGlobalAnim` already bakes in `rootPosition`/
-    /// `rootYaw` for every joint (see decode()), so the skinned vertex
-    /// positions themselves carry the character's absolute movement.
-    ///
-    /// Mutates the SAME MeshResource (a reference type) every frame via
-    /// `.replace(with:)` rather than calling `MeshResource.generate(from:)`
-    /// fresh each time — the original version did that, allocating an
-    /// entirely new GPU-backed resource and reassigning
-    /// `ModelComponent.mesh` 60x/sec, a likely cause of reported
-    /// flicker/hitching (device LiDAR occlusion updates are a separate,
-    /// independent possible cause and weren't ruled out — worth comparing
-    /// against once this change is tested).
-    private func writeSkinnedMesh(character: PFNNCharacter) {
-        guard let meshResource else { return }
-        for j in 0..<PFNNCharacter.jointCount {
-            skinMatrices[j] = character.jointGlobalAnim[j] * character.jointGlobalRest[j].inverse
+    /// This works cleanly ONLY because the skeleton/mesh are built NATIVELY
+    /// in Swift (see `buildMeshResource`) instead of loaded from a USDZ.
+    /// An extensive investigation this session (a dedicated Swift/
+    /// RealityKit sandbox testing well over a dozen jointTransforms
+    /// conventions against a USDZ-loaded version of this same rig/mesh —
+    /// rotation-only, full transforms, absolute vs. delta rotation, both
+    /// multiplication orders, in-place mutation, zero-length connector
+    /// bones, non-identity rest rotations, a known CAMDM precedent from
+    /// another branch) found that RealityKit's import of THIS specific
+    /// hand-authored USDZ silently drops/mishandles joint rest translation
+    /// (its own default `jointTransforms` always read back (0,0,0)
+    /// regardless of what was authored), causing torso/collar distortion
+    /// no matter how jointTransforms was written on that asset. Building
+    /// the IDENTICAL skeleton and mesh natively via `MeshResource.Skeleton`/
+    /// `MeshResource.Contents` (bypassing USD import entirely) reports the
+    /// correct rest translation by default and renders perfectly cleanly
+    /// with this same full-transform write, across an entire walk cycle.
+    private func writeJointTransforms(character: PFNNCharacter) {
+        guard let meshEntity else { return }
+        var transforms = meshEntity.jointTransforms
+        for i in 0..<min(PFNNCharacter.jointCount, transforms.count) {
+            transforms[i] = Transform(matrix: character.jointAnimLocal[i])
         }
+        meshEntity.jointTransforms = transforms
+    }
 
-        for v in 0..<restPositions.count {
-            let w = skinWeights[v]
-            let idx = skinJointIndices[v]
-            var pos = SIMD3<Float>.zero
-            var nrm = SIMD3<Float>.zero
+    /// Builds the puppet's skeleton and skinned mesh entirely in Swift from
+    /// the raw PFNN binaries -- no USDZ/USD import involved at all (see
+    /// `writeJointTransforms`'s doc comment for why this matters).
+    private static func buildMeshResource(
+        parents: [Int], restLocal: [simd_float4x4],
+        rawMesh: (positions: [SIMD3<Float>], normals: [SIMD3<Float>], weights: [SIMD4<Float>], jointIndices: [SIMD4<Int32>], triangles: [UInt32])
+    ) -> MeshResource? {
+        let jointCount = PFNNCharacter.jointCount
+        var worldRest = [simd_float4x4](repeating: matrix_identity_float4x4, count: jointCount)
+        for i in 0..<jointCount {
+            let p = parents[i]
+            worldRest[i] = p == -1 ? restLocal[i] : worldRest[p] * restLocal[i]
+        }
+        let inverseBindPoseMatrices = worldRest.map { $0.inverse }
+        let restPoseTransforms = restLocal.map { Transform(matrix: $0) }
+        let parentIndices: [Int?] = parents.map { $0 == -1 ? nil : $0 }
+
+        guard let skeleton = MeshResource.Skeleton(
+            id: "PFNNSkeleton", jointNames: jointNames,
+            inverseBindPoseMatrices: inverseBindPoseMatrices,
+            restPoseTransforms: restPoseTransforms, parentIndices: parentIndices
+        ) else { return nil }
+
+        var influencesFlat: [MeshJointInfluence] = []
+        influencesFlat.reserveCapacity(rawMesh.positions.count * 4)
+        for v in 0..<rawMesh.positions.count {
+            let w = rawMesh.weights[v], idx = rawMesh.jointIndices[v]
             for k in 0..<4 {
-                let wk = w[k]
-                if wk <= 0 { continue }
-                let m = skinMatrices[Int(idx[k])]
-                let p4 = m * SIMD4<Float>(restPositions[v], 1)
-                pos += wk * SIMD3<Float>(p4.x, p4.y, p4.z)
-                nrm += wk * (upperLeft3x3(m) * restNormals[v])
+                influencesFlat.append(MeshJointInfluence(jointIndex: Int(idx[k]), weight: w[k]))
             }
-            skinnedPositions[v] = pos
-            skinnedNormals[v] = simd_length_squared(nrm) > 1e-8 ? simd_normalize(nrm) : restNormals[v]
         }
 
-        guard let content = Self.buildMeshContents(positions: skinnedPositions, normals: skinnedNormals, triangles: triangles) else { return }
-        try? meshResource.replace(with: content)
-    }
+        var descriptor = MeshDescriptor(name: "PFNNPuppet")
+        descriptor.positions = MeshBuffer(rawMesh.positions)
+        descriptor.normals = MeshBuffer(rawMesh.normals)
+        descriptor.primitives = .triangles(rawMesh.triangles)
 
-    private static func buildMeshResource(positions: [SIMD3<Float>], normals: [SIMD3<Float>], triangles: [UInt32]) -> MeshResource? {
-        guard let content = buildMeshContents(positions: positions, normals: normals, triangles: triangles) else { return nil }
-        return try? MeshResource.generate(from: content)
-    }
+        guard var model = try? MeshResource.Model(id: "PFNNPuppetModel", descriptors: [descriptor]) else { return nil }
+        var newParts: [MeshResource.Part] = []
+        for var part in model.parts {
+            part.jointInfluences = MeshResource.JointInfluences(influences: MeshBuffer(influencesFlat), influencesPerVertex: 4)
+            part.skeletonID = "PFNNSkeleton"
+            newParts.append(part)
+        }
+        model.parts = MeshPartCollection(newParts)
 
-    private static func buildMeshContents(positions: [SIMD3<Float>], normals: [SIMD3<Float>], triangles: [UInt32]) -> MeshResource.Contents? {
-        var descriptor = MeshDescriptor(name: "PFNNSkinned")
-        descriptor.positions = MeshBuffer(positions)
-        descriptor.normals = MeshBuffer(normals)
-        descriptor.primitives = .triangles(triangles)
-        guard let model = try? MeshResource.Model(id: "PFNNSkinnedModel", descriptors: [descriptor]) else { return nil }
         var contents = MeshResource.Contents()
         contents.models = MeshModelCollection([model])
-        contents.instances = MeshInstanceCollection([MeshResource.Instance(id: "PFNNSkinnedInstance", model: "PFNNSkinnedModel")])
-        return contents
+        contents.skeletons = MeshSkeletonCollection([skeleton])
+        contents.instances = MeshInstanceCollection([MeshResource.Instance(id: "PFNNPuppetInstance", model: "PFNNPuppetModel")])
+
+        return try? MeshResource.generate(from: contents)
     }
 
     /// Parses `character_vertices.bin`/`character_triangles.bin` directly
-    /// (bundled as PFNNCharacterVertices.bin / PFNNCharacterTriangles.bin)
-    /// -- the same raw mesh binaries build_puppet.py used to author the
-    /// (now-unused) USDZ. Each vertex is 15 floats: pos.xyz, normal.xyz,
-    /// ao, weight x4, jointIndex x4 (see build_puppet.py's own header).
+    /// (bundled as PFNNCharacterVertices.bin / PFNNCharacterTriangles.bin).
+    /// Each vertex is 15 floats: pos.xyz, normal.xyz, ao, weight x4,
+    /// jointIndex x4 (see build_puppet.py's own header).
     private static func loadRawMesh() -> (positions: [SIMD3<Float>], normals: [SIMD3<Float>], weights: [SIMD4<Float>], jointIndices: [SIMD4<Int32>], triangles: [UInt32])? {
         guard let vertsURL = Bundle.main.url(forResource: "PFNNCharacterVertices", withExtension: "bin"),
               let trisURL = Bundle.main.url(forResource: "PFNNCharacterTriangles", withExtension: "bin"),
