@@ -2,6 +2,7 @@ import RealityKit
 import ARKit
 import simd
 import Combine
+import Darwin
 
 /// Orchestrates the PFNN puppet: owns the network/trajectory/character
 /// state, assembles the network's 342-dim input vector and decodes its
@@ -67,6 +68,29 @@ final class PFNNController: ObservableObject {
     private var frameCounter = 0
     private let groundHeightCacheCellSize: Float = 0.05 // meters
     private let groundHeightCacheLifetime = 12 // frames (~0.2s at 60fps)
+
+    // Profiling: logs a summary roughly once per REAL second (time-based,
+    // not frame-count-based, so it stays ~1s even once FPS has already
+    // dropped) -- device thermal/power state, actual frame time / derived
+    // FPS, a per-stage CPU time breakdown of update(), groundHeightNative's
+    // cache hit rate, and resident memory. Added to investigate a reported
+    // "smooth at first, then drops, and stays dropped even after a full
+    // app restart" pattern -- that specific pattern (unaffected by
+    // relaunching, which should reset all in-process/AR-session state)
+    // points at thermal throttling (tied to physical chip temperature, not
+    // app state) rather than e.g. scanned-mesh size alone.
+    private var profileAccumTime: Float = 0
+    private var profileFrameCount = 0
+    private var profileFrameTimeTotal: Float = 0
+    private var profileFrameTimeMax: Float = 0
+    private var profileGroundHeightTime: CFAbsoluteTime = 0
+    private var profileNetworkPredictTime: CFAbsoluteTime = 0
+    private var profileAssembleInputTime: CFAbsoluteTime = 0
+    private var profileDecodeTime: CFAbsoluteTime = 0
+    private var profileIKTime: CFAbsoluteTime = 0
+    private var profileWriteJointsTime: CFAbsoluteTime = 0
+    private var profileCacheHits = 0
+    private var profileCacheMisses = 0
 
     // Joint names in the exact order character_parents.bin/build_puppet.py
     // use (independently verified earlier this session against parent
@@ -171,6 +195,7 @@ final class PFNNController: ObservableObject {
 
     func update(deltaTime dt: Float) {
         guard isPlaced, let network, let character, arView != nil else { return }
+        let frameStart = CFAbsoluteTimeGetCurrent()
         frameCounter += 1
 
         updateTargetFromJoystick()
@@ -197,21 +222,33 @@ final class PFNNController: ObservableObject {
         // pre_render(): decode using the CURRENT (not-yet-advanced) root.
         let rootPosition = trajectory.rootPosition
         let rootYaw = trajectory.rootYaw
+
+        var t = CFAbsoluteTimeGetCurrent()
         let xp = assembleInput(character: character)
+        profileAssembleInputTime += CFAbsoluteTimeGetCurrent() - t
+
+        t = CFAbsoluteTimeGetCurrent()
         let yp = network.predict(xp, phase: character.phase)
+        profileNetworkPredictTime += CFAbsoluteTimeGetCurrent() - t
 
         if !debugLoggedFirstFrame {
             debugLoggedFirstFrame = true
             PipoLog.log("PFNN frame1: xp[0..6)=\(xp[0..<6]) yp[0..8)=\(yp[0..<8])")
         }
 
+        t = CFAbsoluteTimeGetCurrent()
         character.decode(yp: yp, rootPosition: rootPosition, rootYaw: rootYaw)
+        profileDecodeTime += CFAbsoluteTimeGetCurrent() - t
 
         if debugMode == .full {
+            t = CFAbsoluteTimeGetCurrent()
             character.applyIK(yp: yp, groundHeight: groundHeightNative)
+            profileIKTime += CFAbsoluteTimeGetCurrent() - t
         }
 
+        t = CFAbsoluteTimeGetCurrent()
         writeJointTransforms(character: character)
+        profileWriteJointsTime += CFAbsoluteTimeGetCurrent() - t
 
         // post_render(): advance the trajectory/phase for the NEXT frame.
         trajectory.rollPastForward()
@@ -222,6 +259,78 @@ final class PFNNController: ObservableObject {
         character.phase = character.phase + (standAmount * 0.9 + 0.1) * 2 * .pi * yp[3]
         character.phase = character.phase.truncatingRemainder(dividingBy: 2 * .pi)
         if character.phase < 0 { character.phase += 2 * .pi }
+
+        logProfileIfDue(dt: dt, frameCPUTime: CFAbsoluteTimeGetCurrent() - frameStart)
+    }
+
+    /// Logs a profiling summary roughly once per real second -- see the
+    /// profiling properties' doc comment for why this was added. `dt`-based
+    /// (not frame-count-based) so the interval stays ~1s even once actual
+    /// FPS has already dropped well below 60.
+    private func logProfileIfDue(dt: Float, frameCPUTime: CFAbsoluteTime) {
+        profileFrameCount += 1
+        profileAccumTime += dt
+        profileFrameTimeTotal += Float(frameCPUTime)
+        profileFrameTimeMax = max(profileFrameTimeMax, Float(frameCPUTime))
+
+        guard profileAccumTime >= 1.0 else { return }
+
+        let n = max(profileFrameCount, 1)
+        let avgFPS = Float(profileFrameCount) / profileAccumTime
+        let avgFrameMS = (profileFrameTimeTotal / Float(n)) * 1000
+        let maxFrameMS = profileFrameTimeMax * 1000
+        let groundHeightMS = Float(profileGroundHeightTime / Double(n)) * 1000
+        let networkMS = Float(profileNetworkPredictTime / Double(n)) * 1000
+        let assembleMS = Float(profileAssembleInputTime / Double(n)) * 1000
+        let decodeMS = Float(profileDecodeTime / Double(n)) * 1000
+        let ikMS = Float(profileIKTime / Double(n)) * 1000
+        let writeJointsMS = Float(profileWriteJointsTime / Double(n)) * 1000
+        let cacheTotal = max(profileCacheHits + profileCacheMisses, 1)
+        let cacheHitRate = Float(profileCacheHits) / Float(cacheTotal) * 100
+
+        let thermal: String
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: thermal = "nominal"
+        case .fair: thermal = "fair"
+        case .serious: thermal = "SERIOUS"
+        case .critical: thermal = "CRITICAL"
+        @unknown default: thermal = "unknown"
+        }
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+
+        PipoLog.log("""
+        PFNN profile: fps=\(String(format: "%.1f", avgFPS)) avgFrame=\(String(format: "%.2f", avgFrameMS))ms maxFrame=\(String(format: "%.2f", maxFrameMS))ms \
+        | thermal=\(thermal) lowPower=\(lowPower) memMB=\(String(format: "%.1f", residentMemoryMB())) \
+        | perStage(ms): groundHeight=\(String(format: "%.2f", groundHeightMS)) network=\(String(format: "%.2f", networkMS)) assembleInput=\(String(format: "%.2f", assembleMS)) decode=\(String(format: "%.2f", decodeMS)) ik=\(String(format: "%.2f", ikMS)) writeJoints=\(String(format: "%.2f", writeJointsMS)) \
+        | groundHeightCache: hitRate=\(String(format: "%.0f", cacheHitRate))% size=\(groundHeightCache.count) calls/frame=\(cacheTotal / n)
+        """)
+
+        profileAccumTime = 0
+        profileFrameCount = 0
+        profileFrameTimeTotal = 0
+        profileFrameTimeMax = 0
+        profileGroundHeightTime = 0
+        profileNetworkPredictTime = 0
+        profileAssembleInputTime = 0
+        profileDecodeTime = 0
+        profileIKTime = 0
+        profileWriteJointsTime = 0
+        profileCacheHits = 0
+        profileCacheMisses = 0
+    }
+
+    /// Resident memory footprint in MB, via the standard mach task-info
+    /// API (the usual way to query this on iOS without Instruments).
+    private func residentMemoryMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        let result = withUnsafeMutablePointer(to: &info) { pointer -> kern_return_t in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return -1 }
+        return Double(info.resident_size) / 1024.0 / 1024.0
     }
 
     private func updateTargetFromJoystick() {
@@ -250,6 +359,9 @@ final class PFNNController: ObservableObject {
     /// and converts the hit back into native-space height. Falls back to
     /// native Y=0 (the anchor's own placement height) if nothing is hit.
     private func groundHeightNative(_ native: SIMD2<Float>) -> Float {
+        let profileStart = CFAbsoluteTimeGetCurrent()
+        defer { profileGroundHeightTime += CFAbsoluteTimeGetCurrent() - profileStart }
+
         guard let arView else { return 0 }
         let worldX = anchorPosition.x + native.x * nativeToMeters
         let worldZ = anchorPosition.z + native.y * nativeToMeters
@@ -258,8 +370,10 @@ final class PFNNController: ObservableObject {
             Int32((worldX / groundHeightCacheCellSize).rounded()),
             Int32((worldZ / groundHeightCacheCellSize).rounded()))
         if let cached = groundHeightCache[cellKey], frameCounter - cached.frame < groundHeightCacheLifetime {
+            profileCacheHits += 1
             return cached.height
         }
+        profileCacheMisses += 1
 
         let from = SIMD3<Float>(worldX, anchorPosition.y + 1.0, worldZ)
         let to = SIMD3<Float>(worldX, anchorPosition.y - 2.0, worldZ)
